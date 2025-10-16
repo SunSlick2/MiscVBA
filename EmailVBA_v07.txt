@@ -1,0 +1,203 @@
+Sub EmailExcelRangeWithFormatting()
+    Dim OutlookApp As Object
+    Dim OutlookMail As Object
+    Dim rngToEmail As Range
+    Dim EmailBody As String
+    
+    ' Set your hard-coded values here
+    Const EmailTo As String = "recipient@example.com"
+    Const EmailCC As String = "cc@example.com"
+    Const EmailTitle As String = "Your Email Subject"
+    Const EmailSalutation As String = "Dear Team,"
+    Const EmailSignature As String = "Best regards,<br>Your Name<br>Your Title"
+    
+    ' Set the range to email (A2:D28)
+    Set rngToEmail = ThisWorkbook.Worksheets("Sheet1").Range("A2:D28")
+    
+    ' Create Outlook application
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookMail = OutlookApp.CreateItem(0)
+    
+    ' Build complete HTML email body with formatted table
+    EmailBody = "<html>" & _
+                "<head>" & _
+                "<style>" & _
+                "table {border-collapse: collapse; font-family: Arial, sans-serif;}" & _
+                "td {padding: 4px;}" & _
+                "p {font-family: Arial, sans-serif;}" & _
+                ".number {text-align: right;}" & _
+                ".currency {text-align: right;}" & _
+                ".percent {text-align: right;}" & _
+                "</style>" & _
+                "</head>" & _
+                "<body>" & _
+                "<p>" & EmailSalutation & "</p>" & _
+                "<p>Please find the data below:</p>" & _
+                RangeToHTMLWithFormatting(rngToEmail) & _
+                "<br><br>" & _
+                "<p>" & EmailSignature & "</p>" & _
+                "</body>" & _
+                "</html>"
+    
+    With OutlookMail
+        .To = EmailTo
+        .CC = EmailCC
+        .Subject = EmailTitle
+        .HTMLBody = EmailBody
+        .Display  ' Change to .Send to send automatically
+    End With
+    
+    ' Clean up
+    Set OutlookMail = Nothing
+    Set OutlookApp = Nothing
+    Set rngToEmail = Nothing
+    
+    MsgBox "Email created successfully!", vbInformation
+End Sub
+
+Function RangeToHTMLWithFormatting(rng As Range) As String
+    Dim html As String
+    Dim cell As Range
+    Dim i As Long, j As Long
+    Dim cellValue As String
+    Dim cellFont As Font
+    Dim cellInterior As Interior
+    Dim cellBorders As Borders
+    Dim formattedValue As String
+    
+    ' Start HTML table with overall styling
+    html = "<table style='border-collapse: collapse;'>"
+    
+    ' Loop through each row and column in the range
+    For i = 1 To rng.Rows.Count
+        html = html & "<tr>"
+        For j = 1 To rng.Columns.Count
+            Set cell = rng.Cells(i, j)
+            Set cellFont = cell.Font
+            Set cellInterior = cell.Interior
+            Set cellBorders = cell.Borders
+            
+            ' Get formatted cell value (this preserves number formatting)
+            If IsEmpty(cell) Or cell.Value = "" Then
+                formattedValue = "&nbsp;"
+            Else
+                ' Use the TEXT property to get the formatted value as it appears in Excel
+                formattedValue = cell.Text
+                ' If Text is empty but cell has value, use formatted value
+                If formattedValue = "" And Not IsEmpty(cell) Then
+                    formattedValue = Format(cell.Value, cell.NumberFormat)
+                End If
+                ' Escape HTML special characters
+                formattedValue = Replace(formattedValue, "&", "&amp;")
+                formattedValue = Replace(formattedValue, "<", "&lt;")
+                formattedValue = Replace(formattedValue, ">", "&gt;")
+                formattedValue = Replace(formattedValue, """", "&quot;")
+            End If
+            
+            ' Build cell style
+            Dim cellStyle As String
+            cellStyle = ""
+            
+            ' Font color
+            If cellFont.Color <> 0 And cellFont.Color <> 1 Then
+                cellStyle = cellStyle & "color:" & ColorToHex(cellFont.Color) & ";"
+            End If
+            
+            ' Font bold
+            If cellFont.Bold Then
+                cellStyle = cellStyle & "font-weight:bold;"
+            End If
+            
+            ' Font italic
+            If cellFont.Italic Then
+                cellStyle = cellStyle & "font-style:italic;"
+            End If
+            
+            ' Font size
+            cellStyle = cellStyle & "font-size:" & cellFont.Size & "pt;"
+            
+            ' Font name
+            If cellFont.Name <> "Calibri" Then ' Default font
+                cellStyle = cellStyle & "font-family:" & cellFont.Name & ";"
+            End If
+            
+            ' Background color
+            If cellInterior.Color <> 16777215 And cellInterior.ColorIndex <> xlColorIndexNone Then
+                cellStyle = cellStyle & "background-color:" & ColorToHex(cellInterior.Color) & ";"
+            End If
+            
+            ' Horizontal alignment based on number format
+            Dim numberFormat As String
+            numberFormat = cell.NumberFormat
+            
+            ' Apply appropriate alignment based on number format
+            If IsNumeric(cell.Value) Or IsDate(cell.Value) Then
+                If InStr(numberFormat, "$") > 0 Or InStr(numberFormat, "Currency") > 0 Then
+                    cellStyle = cellStyle & "text-align:right;"
+                ElseIf InStr(numberFormat, "%") > 0 Then
+                    cellStyle = cellStyle & "text-align:right;"
+                ElseIf IsNumeric(cell.Value) Then
+                    cellStyle = cellStyle & "text-align:right;"
+                ElseIf IsDate(cell.Value) Then
+                    cellStyle = cellStyle & "text-align:center;"
+                End If
+            Else
+                Select Case cell.HorizontalAlignment
+                    Case xlLeft
+                        cellStyle = cellStyle & "text-align:left;"
+                    Case xlCenter
+                        cellStyle = cellStyle & "text-align:center;"
+                    Case xlRight
+                        cellStyle = cellStyle & "text-align:right;"
+                    Case Else
+                        cellStyle = cellStyle & "text-align:left;"
+                End Select
+            End Select
+            
+            ' Vertical alignment
+            Select Case cell.VerticalAlignment
+                Case xlTop
+                    cellStyle = cellStyle & "vertical-align:top;"
+                Case xlCenter
+                    cellStyle = cellStyle & "vertical-align:middle;"
+                Case xlBottom
+                    cellStyle = cellStyle & "vertical-align:bottom;"
+            End Select
+            
+            ' Borders
+            If cellBorders(xlEdgeLeft).LineStyle <> xlNone Then
+                cellStyle = cellStyle & "border-left:1px solid " & ColorToHex(cellBorders(xlEdgeLeft).Color) & ";"
+            End If
+            If cellBorders(xlEdgeTop).LineStyle <> xlNone Then
+                cellStyle = cellStyle & "border-top:1px solid " & ColorToHex(cellBorders(xlEdgeTop).Color) & ";"
+            End If
+            If cellBorders(xlEdgeBottom).LineStyle <> xlNone Then
+                cellStyle = cellStyle & "border-bottom:1px solid " & ColorToHex(cellBorders(xlEdgeBottom).Color) & ";"
+            End If
+            If cellBorders(xlEdgeRight).LineStyle <> xlNone Then
+                cellStyle = cellStyle & "border-right:1px solid " & ColorToHex(cellBorders(xlEdgeRight).Color) & ";"
+            End If
+            
+            ' Padding
+            cellStyle = cellStyle & "padding:2px 4px;"
+            
+            ' Add cell to table with all formatting
+            html = html & "<td style='" & cellStyle & "'>" & formattedValue & "</td>"
+        Next j
+        html = html & "</tr>"
+    Next i
+    
+    html = html & "</table>"
+    RangeToHTMLWithFormatting = html
+End Function
+
+Function ColorToHex(color As Long) As String
+    ' Convert Excel color to HTML hex color
+    On Error Resume Next
+    Dim red As Long, green As Long, blue As Long
+    red = color Mod 256
+    green = (color \ 256) Mod 256
+    blue = (color \ 65536) Mod 256
+    ColorToHex = "#" & Format(Hex(red), "00") & Format(Hex(green), "00") & Format(Hex(blue), "00")
+    On Error GoTo 0
+End Function
