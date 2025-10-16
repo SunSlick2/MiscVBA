@@ -1,0 +1,132 @@
+Sub EmailExcelRangeHTML()
+    Dim OutlookApp As Object
+    Dim OutlookMail As Object
+    Dim rngToEmail As Range
+    Dim EmailBody As String
+    
+    ' Set your hard-coded values here
+    Const EmailTo As String = "recipient@example.com"
+    Const EmailCC As String = "cc@example.com"
+    Const EmailTitle As String = "Your Email Subject"
+    Const EmailSalutation As String = "Dear Team,"
+    
+    ' Set the range to email (A2:D28)
+    Set rngToEmail = ThisWorkbook.Worksheets("Sheet1").Range("A2:D28")
+    
+    ' Create Outlook application
+    On Error Resume Next
+    Set OutlookApp = GetObject(, "Outlook.Application")
+    If OutlookApp Is Nothing Then
+        Set OutlookApp = CreateObject("Outlook.Application")
+    End If
+    On Error GoTo 0
+    
+    If OutlookApp Is Nothing Then
+        MsgBox "Cannot create Outlook object. Please make sure Outlook is installed."
+        Exit Sub
+    End If
+    
+    ' Create new email
+    Set OutlookMail = OutlookApp.CreateItem(0)
+    
+    ' Build email body with proper HTML
+    EmailBody = "<html><body>" & _
+                "<p>" & EmailSalutation & "</p>" & _
+                "<p>Please find the data below:</p>" & _
+                RangeToHTMLTable(rngToEmail) & _
+                "</body></html>"
+    
+    With OutlookMail
+        .To = EmailTo
+        .CC = EmailCC
+        .Subject = EmailTitle
+        .HTMLBody = EmailBody
+        .Display ' Display the email
+        
+        ' Add signature after display (this is the reliable method)
+        AddSignature OutlookMail
+    End With
+    
+    ' Clean up
+    Set OutlookMail = Nothing
+    Set OutlookApp = Nothing
+    Set rngToEmail = Nothing
+    
+    MsgBox "Email created successfully!", vbInformation
+End Sub
+
+Function RangeToHTMLTable(rng As Range) As String
+    ' Convert Excel range to HTML table without saving to file
+    Dim html As String
+    Dim cell As Range
+    Dim i As Long, j As Long
+    Dim cellValue As String
+    
+    ' Start HTML table with basic styling
+    html = "<table border='1' cellpadding='4' cellspacing='0' style='border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10pt;'>"
+    
+    ' Loop through each row and column in the range
+    For i = 1 To rng.Rows.Count
+        html = html & "<tr>"
+        For j = 1 To rng.Columns.Count
+            Set cell = rng.Cells(i, j)
+            cellValue = Replace(cell.Value, vbCrLf, "<br>")
+            cellValue = Replace(cellValue, vbLf, "<br>")
+            cellValue = Replace(cellValue, vbCr, "<br>")
+            
+            ' Escape HTML special characters
+            cellValue = Replace(cellValue, "&", "&amp;")
+            cellValue = Replace(cellValue, "<", "&lt;")
+            cellValue = Replace(cellValue, ">", "&gt;")
+            cellValue = Replace(cellValue, """", "&quot;")
+            
+            ' Add cell to table
+            html = html & "<td style='border: 1px solid #ccc; padding: 4px;'>" & cellValue & "</td>"
+        Next j
+        html = html & "</tr>"
+    Next i
+    
+    html = html & "</table>"
+    RangeToHTMLTable = html
+End Function
+
+Sub AddSignature(OutlookMail As Object)
+    ' This method reliably adds the signature by leveraging Outlook's built-in functionality
+    Dim tempMail As Object
+    Dim signature As String
+    
+    On Error GoTo ErrorHandler
+    
+    ' Create a temporary mail item to get the signature
+    Set tempMail = OutlookMail.Application.CreateItem(0)
+    tempMail.Display
+    
+    ' Get the HTML signature
+    signature = tempMail.HTMLBody
+    
+    ' Close the temporary mail without saving
+    tempMail.Close 0 ' olDiscard
+    
+    ' Append signature to the original email
+    If signature <> "" Then
+        OutlookMail.HTMLBody = OutlookMail.HTMLBody & "<br><br>" & signature
+    Else
+        ' Fallback signature if no Outlook signature is found
+        OutlookMail.HTMLBody = OutlookMail.HTMLBody & "<br><br>" & _
+                              "Best regards,<br>" & _
+                              "Your Name<br>" & _
+                              "Your Title"
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    ' Fallback if signature retrieval fails
+    OutlookMail.HTMLBody = OutlookMail.HTMLBody & "<br><br>" & _
+                          "Best regards,<br>" & _
+                          "Your Name<br>" & _
+                          "Your Title"
+    If Not tempMail Is Nothing Then
+        tempMail.Close 0
+    End If
+End Function
