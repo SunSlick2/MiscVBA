@@ -1,0 +1,72 @@
+Sub EmailExcelRangeHTMLSimple()
+    Dim OutlookApp As Object
+    Dim OutlookMail As Object
+    Dim rngToEmail As Range
+    Dim EmailBody As String
+    
+    ' Set your hard-coded values here
+    Const EmailTo As String = "recipient@example.com"
+    Const EmailCC As String = "cc@example.com"
+    Const EmailTitle As String = "Your Email Subject"
+    Const EmailSalutation As String = "Dear Team,"
+    
+    ' Set the range to email
+    Set rngToEmail = ThisWorkbook.Worksheets("Sheet1").Range("A2:D28")
+    
+    ' Create Outlook application
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookMail = OutlookApp.CreateItem(0)
+    
+    ' Build complete HTML email body
+    EmailBody = "<html>" & _
+                "<head>" & _
+                "<style>" & _
+                "table {border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10pt;}" & _
+                "td, th {border: 1px solid #ccc; padding: 4px; text-align: left;}" & _
+                "p {font-family: Arial, sans-serif;}" & _
+                "</style>" & _
+                "</head>" & _
+                "<body>" & _
+                "<p>" & EmailSalutation & "</p>" & _
+                "<p>Please find the data below:</p>" & _
+                RangeToHTMLTableSimple(rngToEmail) & _
+                "<br><br>" & _
+                "<p>Best regards,<br>Your Name<br>Your Signature</p>" & _
+                "</body>" & _
+                "</html>"
+    
+    With OutlookMail
+        .To = EmailTo
+        .CC = EmailCC
+        .Subject = EmailTitle
+        .HTMLBody = EmailBody
+        .Display
+    End With
+    
+    ' Clean up
+    Set OutlookMail = Nothing
+    Set OutlookApp = Nothing
+    Set rngToEmail = Nothing
+    
+    MsgBox "Email created successfully!", vbInformation
+End Sub
+
+Function RangeToHTMLTableSimple(rng As Range) As String
+    Dim html As String
+    Dim cell As Range
+    Dim i As Long, j As Long
+    
+    html = "<table>"
+    
+    For i = 1 To rng.Rows.Count
+        html = html & "<tr>"
+        For j = 1 To rng.Columns.Count
+            Set cell = rng.Cells(i, j)
+            html = html & "<td>" & Replace(Replace(cell.Text, "&", "&amp;"), "<", "&lt;") & "</td>"
+        Next j
+        html = html & "</tr>"
+    Next i
+    
+    html = html & "</table>"
+    RangeToHTMLTableSimple = html
+End Function
