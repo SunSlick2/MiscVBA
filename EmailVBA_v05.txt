@@ -1,0 +1,90 @@
+Sub EmailExcelRangeHTML()
+    Dim OutlookApp As Object
+    Dim OutlookMail As Object
+    Dim rngToEmail As Range
+    Dim EmailBody As String
+    
+    ' Set your hard-coded values here
+    Const EmailTo As String = "recipient@example.com"
+    Const EmailCC As String = "cc@example.com"
+    Const EmailTitle As String = "Your Email Subject"
+    Const EmailSalutation As String = "Dear Team,"
+    Const EmailSignature As String = "Best regards,<br>Your Name<br>Your Title"
+    
+    ' Set the range to email (A2:D28)
+    Set rngToEmail = ThisWorkbook.Worksheets("Sheet1").Range("A2:D28")
+    
+    ' Create Outlook application
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookMail = OutlookApp.CreateItem(0)
+    
+    ' Build complete HTML email body
+    EmailBody = "<html>" & _
+                "<head>" & _
+                "<style>" & _
+                "table {border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10pt;}" & _
+                "td {border: 1px solid #ccc; padding: 4px; text-align: left;}" & _
+                "p {font-family: Arial, sans-serif;}" & _
+                "</style>" & _
+                "</head>" & _
+                "<body>" & _
+                "<p>" & EmailSalutation & "</p>" & _
+                "<p>Please find the data below:</p>" & _
+                RangeToHTMLTable(rngToEmail) & _
+                "<br><br>" & _
+                "<p>" & EmailSignature & "</p>" & _
+                "</body>" & _
+                "</html>"
+    
+    With OutlookMail
+        .To = EmailTo
+        .CC = EmailCC
+        .Subject = EmailTitle
+        .HTMLBody = EmailBody
+        .Display  ' Change to .Send to send automatically
+    End With
+    
+    ' Clean up
+    Set OutlookMail = Nothing
+    Set OutlookApp = Nothing
+    Set rngToEmail = Nothing
+    
+    MsgBox "Email created successfully!", vbInformation
+End Sub
+
+Function RangeToHTMLTable(rng As Range) As String
+    Dim html As String
+    Dim cell As Range
+    Dim i As Long, j As Long
+    Dim cellValue As String
+    
+    ' Start HTML table
+    html = "<table>"
+    
+    ' Loop through each row and column in the range
+    For i = 1 To rng.Rows.Count
+        html = html & "<tr>"
+        For j = 1 To rng.Columns.Count
+            Set cell = rng.Cells(i, j)
+            
+            ' Handle empty cells and escape HTML characters
+            If IsEmpty(cell) Or cell.Value = "" Then
+                cellValue = "&nbsp;"
+            Else
+                cellValue = cell.Value
+                ' Escape HTML special characters
+                cellValue = Replace(cellValue, "&", "&amp;")
+                cellValue = Replace(cellValue, "<", "&lt;")
+                cellValue = Replace(cellValue, ">", "&gt;")
+                cellValue = Replace(cellValue, """", "&quot;")
+            End If
+            
+            ' Add cell to table
+            html = html & "<td>" & cellValue & "</td>"
+        Next j
+        html = html & "</tr>"
+    Next i
+    
+    html = html & "</table>"
+    RangeToHTMLTable = html
+End Function
