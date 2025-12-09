@@ -1,0 +1,212 @@
+Sub ApplyConditionalFormatting()
+Dim lastRow As Integer
+
+Dim MyRange As Range
+
+If Not (ValidTradeSheet(ActiveSheet.Name)) Then
+    MsgBox "Select Correct Sheet"
+    Exit Sub
+End If
+
+
+ThisWorkbook.Sheets(ActiveSheet.Name).Activate
+lastRow = ActiveSheet.Cells(Rows.Count, 1).End(xlUp).row
+    'clear all conditions, helps later with cells containing |
+ActiveSheet.Cells.FormatConditions.Delete
+
+Select Case ActiveSheet.Name
+Case "Position", "NotMine"
+
+    'Target exceeded
+    Set MyRange = Range("$O$7:$O$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=and(O7<0,N7>=M7)"
+    End With
+    With MyRange.FormatConditions(1)
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    'Expiry Date < Today
+    Set MyRange = Range("$P$7:$P$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=and(P7>0,P7<=workday(Today(),1))"
+    End With
+    With MyRange.FormatConditions(1)
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    'no fix < 1.5
+    Set MyRange = Range("$R$7:$R$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .Add Type:=xlCellValue, Operator:=xlBetween, Formula1:="=0", Formula2:="1.5"
+    End With
+    With MyRange.FormatConditions(1)
+        .Interior.Color = RGB(255, 255, 180)
+    End With
+    With MyRange.FormatConditions
+        .Add Type:=xlCellValue, Operator:=xlLess, Formula1:="=0"
+    End With
+    With MyRange.FormatConditions(2)
+        .Interior.Color = RGB(255, 199, 206)
+    End With
+    
+    ' Trade reference duplicate
+    Set MyRange = Range("$W$7:$W$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+   
+    'Updated more than a week ago
+    Set MyRange = Range("$X$7:$X$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=(X7<Today()-7)"
+    End With
+    With MyRange.FormatConditions(1)
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+        ' FXDC  reference duplicate
+    Set MyRange = Range("$AD$7:$AD$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    ' Ext Trade reference duplicate
+    Set MyRange = Range("$AG$7:$AG$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    ' ActiveStrike RedOrangeGreen
+    Set MyRange = Range("$G$7:$G$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=AND(Y7=""Green"",D7=""L"")"
+        '.Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=(Y7=""Green"")"
+        End With
+    Dim MyCol As Long
+    MyCol = CLng("&H" & "AEF359")
+    With MyRange.FormatConditions(1)
+        '.Interior.Color = RGB(122, 241, 136)
+        '.Interior.Color = HexToRGB("#AEF359")
+        .Interior.Color = RGB(MyCol Mod 256, MyCol / 256 Mod 256, MyCol / 256 / 256 Mod 256)
+        .Font.Color = RGB(0, 0, 0)
+    End With
+    With MyRange.FormatConditions
+'        .Delete
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=AND(Y7=""Green"",D7=""S"")"
+        End With
+    MyCol = CLng("&H" & "5DBB63")
+    With MyRange.FormatConditions(2)
+        '.Interior.Color = RGB(122, 241, 136)
+        .Interior.Color = RGB(MyCol Mod 256, MyCol / 256 Mod 256, MyCol / 256 / 256 Mod 256)
+        .Font.Color = RGB(0, 0, 0)
+    End With
+    With MyRange.FormatConditions
+        '.Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=(Y7=""Red"")"
+         .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=AND(Y7=""Red"",D7=""L"")"
+    End With
+    MyCol = CLng("&H" & "FF6666")
+    With MyRange.FormatConditions(3)
+        '.Interior.Color = RGB(255, 97, 97)
+         .Interior.Color = RGB((MyCol / 256 / 256) Mod 256, MyCol / 256 Mod 256, MyCol Mod 256)
+         .Interior.Color = RGB(255, 199, 206)
+         .Font.Color = RGB(0, 0, 0)
+    End With
+    With MyRange.FormatConditions
+         .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=AND(Y7=""Red"",D7=""S"")"
+     End With
+    MyCol = CLng("&H" & "FF3333")
+    With MyRange.FormatConditions(4)
+        '.Interior.Color = RGB(255, 97, 97)
+         .Interior.Color = RGB(MyCol / 256 / 256 Mod 256, MyCol / 256 Mod 256, MyCol Mod 256)
+         .Font.Color = RGB(0, 0, 0)
+    End With
+    
+    With MyRange.FormatConditions
+        .Add Type:=xlExpression, Operator:=xlEqual, Formula1:="=(Y7=""Orange"")"
+    End With
+    With MyRange.FormatConditions(5)
+        .Interior.Color = RGB(255, 255, 153)
+        .Font.Color = RGB(0, 0, 0)
+    End With
+
+     'Cell has |
+    Set MyRange = Range("$A$7:$AL$" & lastRow)
+    With MyRange.FormatConditions
+        .Add Type:=xlTextString, String:="|", TextOperator:=xlContains
+    End With
+    With MyRange.FormatConditions(1)
+        .Interior.Color = 13551615
+        .Font.Color = -16383844
+    End With
+
+Case "OldPositions"
+
+    ' Trade reference duplicate
+    Set MyRange = Range("$W$7:$W$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    ' FXDC  reference duplicate
+    Set MyRange = Range("$AD$7:$AD$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+    
+    ' Ext Trade reference duplicate
+    Set MyRange = Range("$AG$7:$AG$" & lastRow)
+    With MyRange.FormatConditions
+        .Delete
+        .AddUniqueValues
+    End With
+    With MyRange.FormatConditions(1)
+        .DupeUnique = xlDuplicate
+        .Interior.Color = RGB(255, 199, 206)
+        .Font.Color = RGB(156, 0, 6)
+    End With
+    
+
+End Select
+
+End Sub
