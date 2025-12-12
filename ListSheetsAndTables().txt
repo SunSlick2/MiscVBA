@@ -1,0 +1,41 @@
+Sub ListSheetsAndTables()
+    
+    ' Declaring variables
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    
+    ' Print a header to the Immediate Window
+    Debug.Print "--- Spreadsheet Tables Report ---"
+    Debug.Print "Workbook: " & ThisWorkbook.Name
+    Debug.Print String(40, "-") ' A separator line
+    
+    ' Loop through every worksheet in the active workbook
+    For Each ws In ThisWorkbook.Worksheets
+        
+        ' Print the current sheet name
+        Debug.Print "Sheet: " & ws.Name
+        
+        ' Check if the worksheet contains any ListObjects (Tables)
+        If ws.ListObjects.Count > 0 Then
+            
+            ' Loop through every ListObject (Table) on the current worksheet
+            For Each tbl In ws.ListObjects
+                
+                ' Print the name of the table and its range address
+                Debug.Print "    Table Name: " & tbl.Name
+                Debug.Print "    Range:      " & tbl.Range.Address
+                
+            Next tbl
+        Else
+            ' If no tables are found on the sheet
+            Debug.Print "    (No Tables Found)"
+        End If
+        
+        Debug.Print String(40, "-") ' A separator line
+        
+    Next ws
+    
+    ' Print a footer
+    Debug.Print "--- End of Report ---"
+
+End Sub
