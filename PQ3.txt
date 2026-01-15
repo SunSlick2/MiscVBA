@@ -1,0 +1,125 @@
+let
+    // Get the path from the named cell MXFile
+    SourcePath = Excel.CurrentWorkbook(){[Name="MXFile"]}[Content]{0}[Column1], [cite: 1]
+
+    // Load the external workbook using the extracted file path
+    ExternalWorkbook = Excel.Workbook(File.Contents(SourcePath), null, true), [cite: 1]
+
+    // Access specific sheet data
+    Sheet1_Sheet = ExternalWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data], [cite: 1]
+    #"Promoted Headers" = Table.PromoteHeaders(Sheet1_Sheet, [PromoteAllScalars=true]), [cite: 1]
+    #"Merged Queries" = Table.NestedJoin(#"Promoted Headers", {"COUNTERPART"}, ListofACtoAddFrmMurex, {"Column1"}, "ListofACtoAddFrmMurex", JoinKind.Inner), [cite: 1]
+    #"Removed Columns" = Table.RemoveColumns(#"Merged Queries",{"Marketer_Name", "TIME", "SYS.DATE", "Marketer", "Counter Party Long Name", "ENTITY", "PORTFOLIO", "XPOPTPMNT", "TRADER", "SCBENTITY", "BRW_RTE2", "ECP0", "ECP1", "XPTCUR_2", "EP0", "ECPE0", "Fixed / Variable 0", "Fixed / Variable 1", "PER_RET", "OLD_CPTY", "SRC_SYSTEM", "Index1", "Index0", "BRW_MRG2", "BRW_MRG1", "VALID", "CVA_USD", "CTRTY_TYPE", "FAMILY", "BO.SIGN", "CALC_AGENT", "ARCH_LABEL", "Our comment 0", "Our comment 1", "Market Comment", "XPOPTDELIV", "FLAG1", "FLAG0", "XPRMPD", "ST_DATE", "ED_DATE", "IRV", "OSR", "RISK_PORT", "Last MOP Description", "TYPE_1", "TYPE_SUB", "TRN_TYPO", "STRUC_INVL", "TRANCHE_ID", "CFC", "GROUP", "NOTIONAL", "MOP SYSTEM DATE", "Start Date", "BRW_RTE1", "NB.LTI", "Our comment 2", "Doc Id", "NB.EXT", "SCI_ID", "G.ID"}), [cite: 1, 2]
+    #"Reordered Columns" = Table.ReorderColumns(#"Removed Columns",{"COUNTERPART", "INSTRUMENT", "BRW_NOMU1", "QTY.NOMINAL", "BRW_NOMU2", "BRW_NOM2", "XPOPTFPRIC", "B/S", "C/P", "TRN.DATE", "EXPIRY", "TYPE", "A/E", "XPOPTCUTOF", "BARRIER0", "BARRIER1", "XPRMPC", "XPTCUR", "XPRMPA", "CURRENCY1", "TP_STATUS", "NB.INT",  "STRUCT_ID", "STRATEGY","ListofACtoAddFrmMurex"}), [cite: 2]
+  
+    #"Expanded ListofACtoAddFrmMurex" = Table.ExpandTableColumn(#"Reordered Columns", "ListofACtoAddFrmMurex", {"Column2"}, {"ListofACtoAddFrmMurex.Column2"}), [cite: 3]
+    #"Removed Columns1" = Table.RemoveColumns(#"Expanded ListofACtoAddFrmMurex",{"COUNTERPART"}), [cite: 3]
+    #"Reordered Columns1" = Table.ReorderColumns(#"Removed Columns1",{"ListofACtoAddFrmMurex.Column2", "INSTRUMENT", "B/S", "C/P","BRW_NOMU1", "QTY.NOMINAL", "BRW_NOMU2", "BRW_NOM2", "XPOPTFPRIC", "TRN.DATE", "EXPIRY", "TYPE", "A/E", "XPOPTCUTOF", "BARRIER0", "BARRIER1", "XPRMPC", "XPTCUR", "XPRMPA", "CURRENCY1", "TP_STATUS", "NB.INT", "STRUCT_ID", "STRATEGY"}), [cite: 3]
+    #"Filtered Rows" = Table.SelectRows(#"Reordered Columns1", each [#"C/P"] = "C" or [#"C/P"] = "P"), [cite: 3]
+    #"Renamed Columns" = Table.RenameColumns(#"Filtered Rows",{{"ListofACtoAddFrmMurex.Column2", "Client"}, {"INSTRUMENT", "CcyPair"}, {"BRW_NOMU1", "BaseCcy"}, {"QTY.NOMINAL", "BaseNot"}, {"BRW_NOMU2", "CounterCcy"}, {"BRW_NOM2", "CounterNot"}, {"XPOPTFPRIC", "Strike"}, {"XPOPTCUTOF", "Cut"}}), [cite: 3]
+    #"Changed Type" = Table.TransformColumnTypes(#"Renamed Columns",{{"BaseNot", type number}, {"CounterNot", type number}}), [cite: 3]
+ 
+    #"Sorted Rows" = Table.Sort(#"Changed Type",{{"Client", Order.Ascending}}), [cite: 4]
+    #"Replaced Value" = Table.ReplaceValue(#"Sorted Rows","/","",Replacer.ReplaceText,{"CcyPair"}), [cite: 4]
+
+    // Retrieve flip list from named cell
+    FlipListRaw = Excel.CurrentWorkbook(){[Name="CcyPairsToFlipList"]}[Content]{0}[Column1], [cite: 4]
+    FlipListCleaned = Text.Split(Text.Replace(FlipListRaw, " ", ""), ","), [cite: 4]
+
+    // Add Flipped column
+    #"Add Flipped Column" = Table.AddColumn(#"Replaced Value", "Flipped", each if List.Contains(FlipListCleaned, Text.Replace([CcyPair], " ", "")) then "Yes" else null), [cite: 4]
+
+    // Apply conditional swap and CcyPair transformation
+    #"Apply Flip Logic" = Table.FromRecords(
+        Table.TransformRows(#"Add Flipped Column", each 
+            if [Flipped] = "Yes" then [cite: 5]
+                let r = _
+                in Record.TransformFields(r, {
+                    {"BaseCcy", each r[CounterCcy]},
+                    {"CounterCcy", each r[BaseCcy]},
+                    {"BaseNot", each r[CounterNot]},
+                    {"CounterNot", each r[BaseNot]}, [cite: 5, 6]
+                    {"CcyPair", each Text.End(r[CcyPair], 3) & Text.Start(r[CcyPair], 3)},
+                    {"C/P", each if Record.Field(r, "C/P") = "C" then "P" else if Record.Field(r, "C/P") = "P" then "C" else Record.Field(r, "C/P")} [cite: 6, 7]
+                })
+            else _
+        )
+    ),
+
+    // Invert B/S values for all rows
+    #"Invert B/S" = Table.TransformColumns(#"Apply Flip Logic", {
+        {"B/S", each if _ = "B" then "S" else if _ = "S" then "B" else _, type text} [cite: 7]
+    }),
+
+    // --- NEW LOGIC FOR ACCU / DECU COMBINATION ---
+
+    // Convert numeric join fields to text and ensure BARRIER0 is numeric for logical checks 
+    #"Prep Join Fields" = Table.TransformColumnTypes(#"Invert B/S", {
+        {"BaseNot", type text}, 
+        {"CounterNot", type text}, 
+        {"NB.INT", type text},
+        {"BARRIER0", type number}
+    }),
+
+    // Group rows by STRUCT_ID and STRATEGY to identify candidate pairs 
+    #"Grouped Rows" = Table.Group(#"Prep Join Fields", {"STRUCT_ID", "STRATEGY"}, {{"Data", each _, type table}}),
+
+    #"Combined FX_KOFW" = Table.TransformRows(#"Grouped Rows", (grp) =>
+        let
+            Rows = grp[Data],
+            RowCount = Table.RowCount(Rows),
+            
+            // Accu Check: Buy Call (B/C) and Sell Put (S/P) 
+            Row_BC = Table.SelectRows(Rows, each [#"B/S"] = "B" and [#"C/P"] = "C"),
+            Row_SP = Table.SelectRows(Rows, each [#"B/S"] = "S" and [#"C/P"] = "P"),
+            
+            // Decu Check: Buy Put (B/P) and Sell Call (S/C) 
+            Row_BP = Table.SelectRows(Rows, each [#"B/S"] = "B" and [#"C/P"] = "P"),
+            Row_SC = Table.SelectRows(Rows, each [#"B/S"] = "S" and [#"C/P"] = "C"),
+
+            IsAccu = grp[STRATEGY] = "FX_KOFW" and RowCount = 2 and Table.RowCount(Row_BC) = 1 and Table.RowCount(Row_SP) = 1, 
+            IsDecu = grp[STRATEGY] = "FX_KOFW" and RowCount = 2 and Table.RowCount(Row_BP) = 1 and Table.RowCount(Row_SC) = 1, 
+
+            // Ensure other fields are the same before combining [cite: 12, 13, 17]
+            FieldsMatch = if (IsAccu or IsDecu) then Rows{0}[Client] = Rows{1}[Client] and Rows{0}[CcyPair] = Rows{1}[CcyPair] else false,
+
+            Result = 
+                if IsAccu and FieldsMatch then
+                    let B = Row_BC{0}, S = Row_SP{0}
+                    in {Record.Combine({B, [
+                        STRUCT_ID = if B[BARRIER0] = 0 then "Accu-g" else "Accu", 
+                        #"B/S" = "L", 
+                        BaseNot = B[BaseNot] & "/" & S[BaseNot], [cite: 10]
+                        CounterNot = B[CounterNot] & "/" & S[CounterNot], [cite: 11]
+                        #"NB.INT" = B[#"NB.INT"] & "/" & S[#"NB.INT"] [cite: 11]
+                    ]})}
+                else if IsDecu and FieldsMatch then
+                    let B = Row_BP{0}, S = Row_SC{0}
+                    in {Record.Combine({B, [
+                        STRUCT_ID = if B[BARRIER0] = 0 then "Decu-g" else "Decu", 
+                        #"B/S" = "S", 
+                        BaseNot = B[BaseNot] & "/" & S[BaseNot], [cite: 15]
+                        CounterNot = B[CounterNot] & "/" & S[CounterNot], [cite: 16]
+                        #"NB.INT" = B[#"NB.INT"] & "/" & S[#"NB.INT"] [cite: 16]
+                    ]})}
+                else 
+                    Table.ToRecords(Rows) // Don't combine if patterns don't follow [cite: 13]
+        in 
+            Result
+    ),
+
+    #"Final Table" = Table.FromRecords(List.Combine(#"Combined FX_KOFW")),
+
+    // --- END NEW LOGIC ---
+
+    #"Changed Type1" = Table.TransformColumnTypes(#"Final Table",{{"TRN.DATE", type text}}), [cite: 8]
+    #"Sort Table" = Table.Sort(#"Changed Type1", {
+        {"Client", Order.Ascending},
+        {"CcyPair", Order.Ascending},
+        {"Strike", Order.Ascending},
+        {"STRUCT_ID", Order.Ascending},
+        {"BaseNot", Order.Ascending}, 
+        {"B/S", Order.Ascending}
+        }) [cite: 8]
+in
+    #"Sort Table"
