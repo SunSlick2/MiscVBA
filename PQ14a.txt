@@ -1,0 +1,116 @@
+let
+    // 1. Initial Source Loading
+    SourcePath = Excel.CurrentWorkbook(){[Name="MXFile"]}[Content]{0}[Column1],
+    ExternalWorkbook = Excel.Workbook(File.Contents(SourcePath), null, true),
+    Sheet1_Sheet = ExternalWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data],
+    #"Promoted Headers" = Table.PromoteHeaders(Sheet1_Sheet, [PromoteAllScalars=true]),
+    #"Merged Queries" = Table.NestedJoin(#"Promoted Headers", {"COUNTERPART"}, ListofACtoAddFrmMurex, {"Column1"}, "ListofACtoAddFrmMurex", JoinKind.Inner),
+    
+    // Optimization: Remove unnecessary columns early
+    #"Removed Initial Columns" = Table.RemoveColumns(#"Merged Queries",{"Marketer_Name", "TIME", "SYS.DATE", "Marketer", "Counter Party Long Name", "ENTITY", "PORTFOLIO", "XPOPTPMNT", "TRADER", "SCBENTITY", "BRW_RTE2", "ECP0", "ECP1", "XPTCUR_2", "EP0", "ECPE0", "Fixed / Variable 0", "Fixed / Variable 1", "PER_RET", "OLD_CPTY", "SRC_SYSTEM", "Index1", "Index0", "BRW_MRG2", "BRW_MRG1", "VALID", "CVA_USD", "CTRTY_TYPE", "FAMILY", "BO.SIGN", "CALC_AGENT", "ARCH_LABEL", "Our comment 0", "Our comment 1", "Market Comment", "XPOPTDELIV", "FLAG1", "FLAG0", "XPRMPD", "ST_DATE", "ED_DATE", "IRV", "OSR", "RISK_PORT", "Last MOP Description", "TYPE_1", "TYPE_SUB", "TRN_TYPO", "STRUC_INVL", "TRANCHE_ID", "CFC", "GROUP", "NOTIONAL", "MOP SYSTEM DATE", "Start Date", "BRW_RTE1", "NB.LTI", "Our comment 2", "Doc Id", "NB.EXT", "SCI_ID", "G.ID"}),
+    
+    #"Expanded Client" = Table.ExpandTableColumn(#"Removed Initial Columns", "ListofACtoAddFrmMurex", {"Column2"}, {"Client"}),
+    
+    // 2. Initial Renaming and Filtering
+    #"Renamed Base" = Table.RenameColumns(#"Expanded Client",{
+        {"INSTRUMENT", "CcyPair"}, {"BRW_NOMU1", "BaseCcy"}, {"QTY.NOMINAL", "BaseNot"}, 
+        {"BRW_NOMU2", "CounterCcy"}, {"BRW_NOM2", "CounterNot"}, {"XPOPTFPRIC", "Strike"}, 
+        {"XPOPTCUTOF", "Cut"}
+    }),
+    #"Filtered Options" = Table.SelectRows(#"Renamed Base", each [#"C/P"] = "C" or [#"C/P"] = "P"),
+
+    // 3. Currency-based Division (Excluding XAG and XAU)
+    #"Divide Notionals" = Table.TransformRows(#"Filtered Options", (r) => 
+        let
+            divBase = if r[BaseCcy] <> "XAG" and r[BaseCcy] <> "XAU" then Number.From(r[BaseNot]) / 1000 else Number.From(r[BaseNot]),
+            divCounter = if r[CounterCcy] <> "XAG" and r[CounterCcy] <> "XAU" then Number.From(r[CounterNot]) / 1000 else Number.From(r[CounterNot])
+        in
+            Record.TransformFields(r, {{"BaseNot", each divBase}, {"CounterNot", each divCounter}})
+    ),
+    #"Converted Divided" = Table.FromRecords(#"Divide Notionals"),
+    
+    // 4. Flip Logic and Invert B/S
+    #"Clean CcyPair" = Table.ReplaceValue(#"Converted Divided","/","",Replacer.ReplaceText,{"CcyPair"}),
+    FlipListRaw = Excel.CurrentWorkbook(){[Name="CcyPairsToFlipList"]}[Content]{0}[Column1],
+    FlipListCleaned = Text.Split(Text.Replace(FlipListRaw, " ", ""), ","),
+    #"Add Flipped" = Table.AddColumn(#"Clean CcyPair", "Flipped", each if List.Contains(FlipListCleaned, [CcyPair]) then "Yes" else null),
+    
+    #"Apply Flip" = Table.FromRecords(Table.TransformRows(#"Add Flipped", each 
+        if [Flipped] = "Yes" then 
+            let r = _ in Record.TransformFields(r, {
+                {"BaseCcy", each r[CounterCcy]}, {"CounterCcy", each r[BaseCcy]}, 
+                {"BaseNot", each r[CounterNot]}, {"CounterNot", each r[BaseNot]}, 
+                {"CcyPair", each Text.End(r[CcyPair], 3) & Text.Start(r[CcyPair], 3)}, 
+                {"C/P", each if r[#"C/P"] = "C" then "P" else "C"}
+            }) 
+        else _
+    )),
+    #"Invert BS" = Table.TransformColumns(#"Apply Flip", {{"B/S", each if _ = "B" then "S" else if _ = "S" then "B" else _, type text}}),
+
+    // 5. Combination Logic for FX_KOFW (Accu/Decu)
+    #"Prep Fields" = Table.TransformColumnTypes(#"Invert BS", {{"BaseNot", type text}, {"CounterNot", type text}, {"NB.INT", type text}, {"BARRIER0", type number}}),
+    #"Grouped" = Table.Group(#"Prep Fields", {"STRUCT_ID", "STRATEGY"}, {{"Data", each _, type table}}),
+    #"Combined" = Table.AddColumn(#"Grouped", "Combined", each 
+        let
+            rows = [Data],
+            rowBC = Table.SelectRows(rows, each [#"B/S"] = "B" and [#"C/P"] = "C"),
+            rowSP = Table.SelectRows(rows, each [#"B/S"] = "S" and [#"C/P"] = "P"),
+            rowBP = Table.SelectRows(rows, each [#"B/S"] = "B" and [#"C/P"] = "P"),
+            rowSC = Table.SelectRows(rows, each [#"B/S"] = "S" and [#"C/P"] = "C"),
+            isAccu = [STRATEGY] = "FX_KOFW" and Table.RowCount(rows) = 2 and Table.RowCount(rowBC) = 1 and Table.RowCount(rowSP) = 1,
+            isDecu = [STRATEGY] = "FX_KOFW" and Table.RowCount(rows) = 2 and Table.RowCount(rowBP) = 1 and Table.RowCount(rowSC) = 1
+        in
+            if isAccu then {Record.Combine({rowBC{0}, [Struct = if rowBC{0}[BARRIER0] = 0 then "Accu-g" else "Accu", #"B/S" = "L", BaseNot = rowBC{0}[BaseNot] & "/" & rowSP{0}[BaseNot], #"NB.INT" = rowBC{0}[#"NB.INT"] & "/" & rowSP{0}[#"NB.INT"]]})}
+            else if isDecu then {Record.Combine({rowBP{0}, [Struct = if rowBP{0}[BARRIER0] = 0 then "Decu-g" else "Decu", #"B/S" = "S", BaseNot = rowBP{0}[BaseNot] & "/" & rowSC{0}[BaseNot], #"NB.INT" = rowBP{0}[#"NB.INT"] & "/" & rowSC{0}[#"NB.INT"]]})}
+            else Table.ToRecords(rows)
+    ),
+    #"Expanded Combined" = Table.FromRecords(List.Combine(#"Combined"[Combined])),
+
+    // 6. Struct Naming and Strike Mapping (Lower Strike / Upper Strike)
+    #"Final Struct Logic" = Table.TransformRows(#"Expanded Combined", (r) =>
+        let 
+            s = if r[STRATEGY] = "FX_EURO" then 
+                    if r[#"B/S"] = "S" and r[#"C/P"] = "P" then "Put-Short"
+                    else if r[#"B/S"] = "S" and r[#"C/P"] = "C" then "Call-Short"
+                    else if r[#"B/S"] = "L" and r[#"C/P"] = "P" then "Put-Long"
+                    else if r[#"B/S"] = "L" and r[#"C/P"] = "C" then "Call-Long"
+                    else "Error"
+                else if r[STRATEGY] = "FX_KOFW" then (if r[Struct] = null then "Error" else r[Struct])
+                else "Error",
+            lowStrike = if List.Contains({"Put-Short", "Put-Long", "Accu", "Accu-g"}, s) then r[Strike] else null,
+            upStrike = if List.Contains({"Call-Short", "Call-Long", "Decu", "Decu-g"}, s) then r[Strike] else null
+        in
+            Record.Combine({r, [Struct = s, #"Lower Strike" = lowStrike, #"Upper Strike" = upStrike]})
+    ),
+    #"Final Table" = Table.FromRecords(#"Final Struct Logic"),
+
+    // 7. Final Header Mapping and Column Selection
+    #"Mapped Headers" = Table.RenameColumns(#"Final Table",{
+        {"Client", "Customer"}, {"CcyPair", "CCYpair"}, {"BaseCcy", "Ccy"}, 
+        {"BaseNot", "Notional"}, {"Strike", "Active Strike"}, {"BARRIER0", "KO/Pivot"}, 
+        {"EXPIRY", "Expiry"}, {"TRN.DATE", "Trade Date"}, {"TP_STATUS", "Live/Cash"}, 
+        {"STRUCT_ID", "FXDC Ref"}, {"Flipped", "Comment"}
+    }),
+
+    // Define all required output columns in the order requested
+    AllHeaders = {
+        "Customer", "CCYpair", "Struct", "LS", "Ccy", "Notional", "Active Strike", 
+        "Lower eKI", "Lower Strike", "KO/Pivot", "Upper Strike", "Upper eKI", 
+        "Target", "Used", "Target Left", "Expiry", "Live/Cash", "Exp Fix", 
+        "Total Fix", "DOW", "Current Spot", "Spot on Trade/ BE Spot", "Trade Ref", 
+        "Updated", "ROG Code", "Lev Not rem fix base ccy", "Lev Not max fix $ equive", 
+        "Select", "Restructure Candidate", "FXDC Ref", "Counteparty", "Trade Date", 
+        "CP ref", "Unwind Price Date", "Unwind Spot", "Unwind (IB)", "Brief Terms", 
+        "Comment", "MTM Diff"
+    },
+    
+    // Add missing headers as null columns
+    #"Add Missing" = List.Accumulate(AllHeaders, #"Mapped Headers", (state, current) => 
+        if List.Contains(Table.ColumnNames(state), current) then state 
+        else Table.AddColumn(state, current, each null)
+    ),
+    
+    // Final Step: Strictly select and order only the requested columns
+    #"Final Output" = Table.SelectColumns(#"Add Missing", AllHeaders)
+in
+    #"Final Output"
