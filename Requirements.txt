@@ -1,0 +1,37 @@
+1. Change the output of the query to have following Headers (separated by ";")
+
+Customer;CCYpair;Struct;LS ;Ccy;Notional;Active 
+Strike;Lower eKI;Lower Strike;KO/Pivot;Upper Strike;Upper eKI;Target;Used;Target 
+Left;Expiry;Live
+/Cash;Exp Fix;Total Fix;DOW;Current 
+Spot;Spot on Trade/ BE Spot;Trade Ref;Updated;ROG
+Code;Lev Not 
+rem fix 
+base ccy;Lev Not 
+max fix 
+$ equive;Select;Restructure Candidate;FXDC Ref;Counteparty;Trade Date;CP ref;Unwind 
+Price 
+Date;Unwind Spot;Unwind (IB);Brief Terms;Comment;MTM Diff;Select"
+
+2. From the current query, change the Header name such that
+Client=Customer
+CcyPair=CcyPair
+Struct=Struct
+Strike = Active Strike
+BaseCcy=Ccy
+BaseNot=Notional
+Strike=Active Strike
+BARRIER0 = KO/Pivot
+EXPIRY=Expiry
+TRN.DATE=Trade Date
+TP_STATUS=Live/Cash
+STRUCT_ID = FXDC Ref	
+Flipped = Comment	Spot rate
+
+3. Whichever Header name is missing, add a corresponding columns with values as null
+
+4. Further, if 
+(a) Struct = Put-Short, Put-Long, Accu or Accu-g, then Lower Strike = Strike, null otherwise
+(b) Struct = Call-Short, Call-Long, Decu or Decu-g, then Upper Strike = Strike, null otherwise
+
+5. Optimise the powerquery
