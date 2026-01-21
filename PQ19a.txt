@@ -1,0 +1,139 @@
+let
+    // 1. Initial Source Loading
+    SourcePath = Excel.CurrentWorkbook(){[Name="MXFile"]}[Content]{0}[Column1],
+    ExternalWorkbook = Excel.Workbook(File.Contents(SourcePath), null, true),
+    Sheet1_Sheet = ExternalWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data],
+    #"Promoted Headers" = Table.PromoteHeaders(Sheet1_Sheet, [PromoteAllScalars=true]),
+    
+    // 2. The Fix: Merging and Filtering Shortlisted Clients
+    // We use Inner Join to filter the counterparts immediately. 
+    // This will keep all trades (EURO and KOFW) for any client in your list. [cite: 1]
+    #"Merged Queries" = Table.NestedJoin(#"Promoted Headers", {"COUNTERPART"}, ListofACtoAddFrmMurex, {"Column1"}, "ListofACtoAddFrmMurex", JoinKind.Inner),
+    
+    // Expand the Client Name immediately so the columns are fixed
+    #"Expanded Client" = Table.ExpandTableColumn(#"Merged Queries", "ListofACtoAddFrmMurex", {"Column2"}, {"Client"}),
+
+    // 3. Remove unnecessary columns [cite: 1, 2]
+    #"Removed Initial Columns" = Table.RemoveColumns(#"Expanded Client",{"Marketer_Name", "TIME", "SYS.DATE", "Marketer", "Counter Party Long Name", "ENTITY", "PORTFOLIO", "XPOPTPMNT", "TRADER", "SCBENTITY", "BRW_RTE2", "ECP0", "ECP1", "XPTCUR_2", "EP0", "ECPE0", "Fixed / Variable 0", "Fixed / Variable 1", "PER_RET", "OLD_CPTY", "SRC_SYSTEM", "Index1", "Index0", "BRW_MRG2", "BRW_MRG1", "VALID", "CVA_USD", "CTRTY_TYPE", "FAMILY", "BO.SIGN", "CALC_AGENT", "ARCH_LABEL", "Our comment 0", "Our comment 1", "Market Comment", "XPOPTDELIV", "FLAG1", "FLAG0", "XPRMPD", "ST_DATE", "ED_DATE", "IRV", "OSR", "RISK_PORT", "Last MOP Description", "TYPE_1", "TYPE_SUB", "TRN_TYPO", "STRUC_INVL", "TRANCHE_ID", "CFC", "GROUP", "NOTIONAL", "MOP SYSTEM DATE", "Start Date", "BRW_RTE1", "NB.LTI", "Our comment 2", "Doc Id", "NB.EXT", "SCI_ID", "G.ID", "COUNTERPART"}),
+    
+    // 4. Renaming and Filtering (PQ12 logic) [cite: 3]
+    #"Renamed Base" = Table.RenameColumns(#"Removed Initial Columns",{
+        {"INSTRUMENT", "CcyPair"}, {"BRW_NOMU1", "BaseCcy"}, {"QTY.NOMINAL", "BaseNot"}, 
+        {"BRW_NOMU2", "CounterCcy"}, {"BRW_NOM2", "CounterNot"}, {"XPOPTFPRIC", "Strike"}, 
+        {"XPOPTCUTOF", "Cut"}
+    }),
+    #"Filtered Options" = Table.SelectRows(#"Renamed Base", each [#"C/P"] = "C" or [#"C/P"] = "P"),
+
+    // 5. Currency-based Division (PQ12 logic) [cite: 4, 5]
+    #"Divide Notionals" = Table.TransformRows(#"Filtered Options", (r) => 
+        let
+            divBase = if r[BaseCcy] <> "XAG" and r[BaseCcy] <> "XAU" then Number.From(r[BaseNot]) / 1000 else Number.From(r[BaseNot]),
+            divCounter = if r[CounterCcy] <> "XAG" and r[CounterCcy] <> "XAU" then Number.From(r[CounterNot]) / 1000 else Number.From(r[CounterNot])
+        in
+            Record.TransformFields(r, {{"BaseNot", each divBase}, {"CounterNot", each divCounter}})
+    ),
+    #"Converted Divided" = Table.FromRecords(#"Divide Notionals", Value.Type(#"Filtered Options")),
+    
+    // 6. Flip Logic (PQ12 logic using "Flipped") [cite: 5, 6]
+    #"Clean CcyPair" = Table.ReplaceValue(#"Converted Divided","/","",Replacer.ReplaceText,{"CcyPair"}),
+    FlipListRaw = Excel.CurrentWorkbook(){[Name="CcyPairsToFlipList"]}[Content]{0}[Column1],
+    #"Add Flipped Column" = Table.AddColumn(#"Clean CcyPair", "FlippedIndicator", each if List.Contains(FlipListRaw, Text.Replace([CcyPair], " ", "")) then "Flipped" else null),
+    
+    #"Apply Flip Logic" = Table.FromRecords(Table.TransformRows(#"Add Flipped Column", each 
+        if [FlippedIndicator] = "Flipped" then 
+            let r = _ in Record.TransformFields(r, {
+                {"BaseCcy", each r[CounterCcy]}, 
+                {"CounterCcy", each r[BaseCcy]}, 
+                {"BaseNot", each r[CounterNot]}, 
+                {"CounterNot", each r[BaseNot]}, 
+                {"CcyPair", each Text.End(r[CcyPair], 3) & Text.Start(r[CcyPair], 3)}, 
+                {"C/P", each if Record.Field(r, "C/P") = "C" then "P" else if Record.Field(r, "C/P") = "P" then "C" else Record.Field(r, "C/P")}
+            }) 
+        else _)),
+
+    #"Invert BS" = Table.TransformColumns(#"Apply Flip Logic", {{"B/S", each if _ = "B" then "S" else if _ = "S" then "B" else _, type text}}),
+
+    // 7. Combination Logic (PQ12 logic for FX_KOFW) [cite: 7, 8, 9]
+    #"Added Struct Placeholder" = Table.AddColumn(#"Invert BS", "Struct", each null),
+    #"Prep Fields" = Table.TransformColumnTypes(#"Added Struct Placeholder", {{"BaseNot", type text}, {"CounterNot", type text}, {"NB.INT", type text}, {"BARRIER0", type number}}),
+    
+    #"Process Strategies" = Table.Group(#"Prep Fields", {"STRATEGY"}, {{"Data", each _, type table}}),
+    
+    #"Process Combinations" = Table.AddColumn(#"Process Strategies", "Processed", each 
+        if [STRATEGY] = "FX_KOFW" then 
+            let
+                grouped = Table.Group([Data], {"STRUCT_ID"}, {{"Rows", each _, type table}}),
+                combined = Table.AddColumn(grouped, "Combined", each 
+                    let
+                        rows = [Rows],
+                        rowBC = Table.SelectRows(rows, each [#"B/S"] = "B" and [#"C/P"] = "C"),
+                        rowSP = Table.SelectRows(rows, each [#"B/S"] = "S" and [#"C/P"] = "P"),
+                        rowBP = Table.SelectRows(rows, each [#"B/S"] = "B" and [#"C/P"] = "P"),
+                        rowSC = Table.SelectRows(rows, each [#"B/S"] = "S" and [#"C/P"] = "C"),
+                        isAccu = Table.RowCount(rows) = 2 and Table.RowCount(rowBC) = 1 and Table.RowCount(rowSP) = 1,
+                        isDecu = Table.RowCount(rows) = 2 and Table.RowCount(rowBP) = 1 and Table.RowCount(rowSC) = 1
+                    in
+                        if isAccu then {Record.Combine({rowBC{0}, [Struct = if rowBC{0}[BARRIER0] = 0 then "Accu-g" else "Accu", #"B/S" = "L", BaseNot = rowBC{0}[BaseNot] & "/" & rowSP{0}[BaseNot], #"NB.INT" = rowBC{0}[#"NB.INT"] & "/" & rowSP{0}[#"NB.INT"]]})}
+                        else if isDecu then {Record.Combine({rowBP{0}, [Struct = if rowBP{0}[BARRIER0] = 0 then "Decu-g" else "Decu", #"B/S" = "S", BaseNot = rowBP{0}[BaseNot] & "/" & rowSC{0}[BaseNot], #"NB.INT" = rowBP{0}[#"NB.INT"] & "/" & rowSC{0}[#"NB.INT"]]})}
+                        else Table.ToRecords(rows)
+                )
+            in
+                List.Combine(combined[Combined])
+        else 
+            Table.ToRecords([Data])
+    ),
+    #"Combined Result" = Table.FromRecords(List.Combine(#"Process Combinations"[Processed])),
+
+    // 8. Struct Naming and Mapping (PQ12 logic) [cite: 14, 15]
+    #"Final Struct Logic" = Table.TransformRows(#"Combined Result", (r) =>
+        let 
+            s = if r[STRATEGY] = "FX_EURO" then 
+                    if r[#"B/S"] = "S" and r[#"C/P"] = "P" then "Short-Put"
+                    else if r[#"B/S"] = "S" and r[#"C/P"] = "C" then "Short-Call"
+                    else if r[#"B/S"] = "L" and r[#"C/P"] = "P" then "Long-Put"
+                    else if r[#"B/S"] = "L" and r[#"C/P"] = "C" then "Long-Call"
+                    else "Error"
+                else if r[STRATEGY] = "FX_KOFW" then (if r[Struct] = null then "Error" else r[Struct])
+                else "Error",
+            lowStrike = if List.Contains({"Short-Put", "Long-Put", "Accu", "Accu-g"}, s) then r[Strike] else null,
+            upStrike = if List.Contains({"Short-Call", "Long-Call", "Decu", "Decu-g"}, s) then r[Strike] else null
+        in
+            Record.Combine({r, [Struct = s, #"Lower Strike" = lowStrike, #"Upper Strike" = upStrike]})
+    ),
+    #"Final Table" = Table.FromRecords(#"Final Struct Logic"),
+
+    // 9. Final Headers and Sorting [cite: 17, 18]
+    #"Mapped Headers" = Table.RenameColumns(#"Final Table",{
+        {"Client", "Customer"}, {"CcyPair", "CCYpair"}, {"BaseCcy", "Ccy"}, 
+        {"BaseNot", "Notional"}, {"Strike", "Active Strike"}, {"BARRIER0", "KO/Pivot"}, 
+        {"EXPIRY", "Expiry"}, {"TRN.DATE", "Trade Date"}, {"TP_STATUS", "Live/Cash"}, 
+        {"STRUCT_ID", "FXDC Ref"}, {"FlippedIndicator", "Comment"}
+    }),
+    FlipListCleaned = Text.Split(Text.Replace(#"Mapped Headers", " ", ""), ","),
+
+    AllHeaders = {
+        "Customer", "CCYpair", "Struct", "LS", "Ccy", "Notional", "Active Strike", 
+        "Lower eKI", "Lower Strike", "KO/Pivot", "Upper Strike", "Upper eKI", 
+        "Target", "Used", "Target Left", "Expiry", "Live/Cash", "Exp Fix", 
+        "Total Fix", "DOW", "Current Spot", "Spot on Trade/ BE Spot", "Trade Ref", 
+        "Updated", "ROG Code", "Lev Not rem fix base ccy", "Lev Not max fix $ equive", 
+        "Select", "Restructure Candidate", "FXDC Ref", "Counteparty", "Trade Date", 
+        "CP ref", "Unwind Price Date", "Unwind Spot", "Unwind (IB)", "Brief Terms", 
+        "Comment", "MTM Diff"
+    },
+    
+    #"Add Missing" = List.Accumulate(AllHeaders, FlipListCleaned, (state, current) => 
+        if List.Contains(Table.ColumnNames(state), current) then state 
+        else Table.AddColumn(state, current, each null)
+    ),
+    
+    #"Selected Columns" = Table.SelectColumns(#"Add Missing", AllHeaders),
+
+    #"Sorted Output" = Table.Sort(#"Selected Columns", {
+        {"Customer", Order.Ascending}, 
+        {"CCYpair", Order.Ascending}, 
+        {"Active Strike", Order.Ascending}, 
+        {"FXDC Ref", Order.Ascending}
+    })
+in
+    #"Sorted Output"
