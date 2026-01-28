@@ -1,0 +1,581 @@
+Sub ImportMultipleTSVAndStackDatav6()
+    Dim ws As Worksheet
+    Dim filepath As Variant
+    Dim fileData As String
+    Dim rows() As String
+    Dim rowData As String
+    Dim i As Long, k As Long
+    Dim key As Variant
+    
+    ' Variable declarations
+    Dim fd As FileDialog
+    Dim lastRow As Long
+    Dim ToFlipTable As Collection
+    Dim flipEntry(2) As String
+    Dim startSCNRates As Boolean, endSCNRates As Boolean
+    Dim startRiskCashflow As Boolean, endRiskCashflow As Boolean
+    Dim startSCNSynthetic As Boolean, endSCNSynthetic As Boolean
+    Dim lineData As Variant
+    Dim ccy As String
+    Dim totalData() As Variant
+    Dim ccyPair As String
+    Dim currentFlipEntry() As String
+    Dim divCurrency As String
+    Dim mulCurrency As String
+    Dim originalExposure As Double
+    Dim manipulatedExposure As Double
+    Dim divRate As Double
+    Dim mulRate As Double
+    Dim valueForMio As Double
+    Dim fxData() As Variant
+    Dim coverRatioString As String
+    Dim exposureString As String
+    Dim fxRateString As String
+    
+    ' Variables for the new in-place update logic
+    Dim fileMap As Object
+    Dim currentRow As Long
+    Dim clientIDValue As String
+    Dim rowsWritten As Long
+    Dim nextClientIDRow As Long
+    Dim oldBlockEndRow As Long
+
+    ' Data structures for the blocks of data
+    Dim dataCollection As Collection
+    Dim fxRates As Object
+    Dim scnSyntheticData As Collection ' New: Store Section D data
+    Dim clientID As String
+    Dim coverRatio As Double
+    Dim foundCover As Boolean
+    Dim singleCurrencySuppressed As Boolean ' New: Flag for suppressed netting
+    Dim errorMessages As Collection ' New: Store error messages
+    
+    ' --- 1. Setup and File Selection ---
+    
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    Set fileMap = CreateObject("Scripting.Dictionary")
+
+    With fd
+        .Title = "Select TSV Files"
+        .Filters.Clear
+        .Filters.Add "TSV Files", "*.tsv"
+        .InitialFileName = INITIAL_DIRECTORY
+        .AllowMultiSelect = True
+
+        If .Show = -1 Then
+            ' Set the output worksheet to "ContRisk3"
+            On Error Resume Next
+            Set ws = ThisWorkbook.Sheets("ContRisk3")
+            On Error GoTo 0
+            If ws Is Nothing Then
+                Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+                ws.Name = "ContRisk3"
+                
+                ' Set up headers for ContRisk3
+                ws.Cells(1, 1).Value = "ClientID"
+                ws.Cells(1, 2).Value = "CoverRatio"
+                ws.Cells(1, 3).Value = "CcyPair"
+                ws.Cells(1, 4).Value = "Delta (mio)"
+                ws.Cells(1, 5).Value = "Synth. Exp."
+                ws.Cells(1, 6).Value = "SOV"
+                ws.Cells(1, 7).Value = "Risk Ccy"
+                ws.Cells(1, 8).Value = "Exposure(RiskCcy)"
+                ws.Cells(1, 9).Value = "Manipulated Exposure"
+                ' Column J is blank
+                ws.Cells(1, 11).Value = "Currency"
+                ws.Cells(1, 12).Value = "Mid Spot rate"
+                ws.Cells(1, 18).Value = "Errors" ' Column R
+            End If
+            
+            ' Pre-load the ToFlipTable from columns N, O, P (new columns)
+            Set ToFlipTable = New Collection
+            k = 2 ' Start from row 2 to skip the header
+            Dim wsCurrent As Worksheet
+            Set wsCurrent = ThisWorkbook.Sheets(ws.Name)
+            
+            Do While Len(wsCurrent.Cells(k, 14).Value) > 0 And (Len(wsCurrent.Cells(k, 15).Value) > 0 Or Len(wsCurrent.Cells(k, 16).Value) > 0)
+                flipEntry(0) = wsCurrent.Cells(k, 14).Value ' Currency pair from column N
+                flipEntry(1) = wsCurrent.Cells(k, 15).Value ' Divisor currency from column O
+                flipEntry(2) = wsCurrent.Cells(k, 16).Value ' Multiplier currency from column P
+                ToFlipTable.Add flipEntry
+                k = k + 1
+            Loop
+            
+            ' --- 2. Map Selected TSV Files to Client IDs ---
+            For Each filepath In .SelectedItems
+                ' Extract ClientID from Filename
+                Dim fileName As String
+                Dim startPos As Long
+                Dim endPos As Long
+                
+                fileName = Mid(filepath, InStrRev(filepath, "\") + 1)
+                startPos = InStr(fileName, "PORTFOLIO_ANALYSIS_") + Len("PORTFOLIO_ANALYSIS_")
+                endPos = InStr(startPos, fileName, "_")
+                
+                If startPos > Len("PORTFOLIO_ANALYSIS_") And endPos > startPos Then
+                    clientID = Mid(fileName, startPos, endPos - startPos)
+                Else
+                    clientID = "N/A"
+                End If
+                
+                If Not fileMap.Exists(clientID) Then
+                    fileMap.Add clientID, filepath
+                End If
+            Next filepath
+            
+            ' --- 3. Main Loop: Iterate Column A and Update Data In-Place ---
+
+            lastRow = ws.Cells(ws.Rows.Count, "K").End(xlUp).Row
+            
+            ' Clear columns B through K (main data area)
+            If lastRow > 1 Then
+                ws.Range("B2:K" & lastRow).ClearContents
+            End If
+            
+            currentRow = 2 ' Start after the header
+            
+            Do While currentRow <= lastRow
+                clientIDValue = Trim(ws.Cells(currentRow, 1).Value)
+
+                ' Only update if a valid ClientID is found in Col A AND we have a file for it
+                If Len(clientIDValue) > 0 And fileMap.Exists(clientIDValue) Then
+                    filepath = fileMap(clientIDValue)
+                    
+                    ' Reset variables for processing the TSV file
+                    Set dataCollection = New Collection
+                    Set fxRates = CreateObject("Scripting.Dictionary")
+                    Set scnSyntheticData = New Collection ' New: For Section D data
+                    Set errorMessages = New Collection ' New: For error logging
+                    coverRatio = 0
+                    foundCover = False
+                    singleCurrencySuppressed = False ' New: Reset flag
+                    
+                    ' --- Read and Process Data from TSV file ---
+                    Open filepath For Input As #1
+                    fileData = Input$(LOF(1), 1)
+                    Close #1
+                    
+                    rows = Split(fileData, vbCrLf)
+                    startSCNRates = False: endSCNRates = False
+                    startRiskCashflow = False: endRiskCashflow = False
+                    startSCNSynthetic = False: endSCNSynthetic = False ' New: For Section D
+                    
+                    For i = 0 To UBound(rows)
+                        If Len(Trim(rows(i))) > 0 Then
+                            rowData = Application.Trim(rows(i))
+                            
+                            ' Check for Single Currency Netting Suppressed
+                            If InStr(rowData, "<*** SINGLE CURRENCY NETTING SUPPRESSED ***>") > 0 Then
+                                singleCurrencySuppressed = True
+                            End If
+                            
+                            ' Find Cover Ratio
+                            If InStr(rowData, "Cover Ratio") > 0 Then
+                                coverRatioString = Trim(Split(rowData, vbTab)(UBound(Split(rowData, vbTab))))
+                                coverRatioString = Replace(coverRatioString, ",", "")
+                                If IsNumeric(coverRatioString) Then coverRatio = CDbl(coverRatioString)
+                                foundCover = True
+                            End If
+                            
+                            ' Find FX Rates (Section B)
+                            If UCase(rowData) Like "B. SCN RATES*" Then startSCNRates = True
+                            If UCase(rowData) Like "C. SCN BREAKDOWN*" Then endSCNRates = True
+                            If startSCNRates And Not endSCNRates And InStr(1, rowData, "FX.Rate.", vbTextCompare) > 0 And InStr(1, rowData, ".Spot", vbTextCompare) > 0 Then
+                                lineData = Split(rowData, vbTab)
+                                ccy = Split(lineData(0), ".")(2)
+                                fxRateString = Trim(lineData(UBound(lineData)))
+                                fxRateString = Replace(fxRateString, ",", "")
+                                If IsNumeric(fxRateString) Then
+                                    If Not fxRates.Exists(ccy) Then fxRates.Add ccy, CDbl(fxRateString)
+                                End If
+                            End If
+                            
+                            ' Find SCN Synthetic Positions Data (Section D) - NEW
+                            If rowData Like "D. SCN SYNTHETIC POSITIONS*" Then startSCNSynthetic = True
+                            If rowData Like "E. SYNTHETIC POSITIONS*" Then endSCNSynthetic = True
+                            If startSCNSynthetic And Not endSCNSynthetic Then
+                                ' Skip divider lines and empty lines
+                                rowData = Trim(rowData)
+                                If Len(rowData) > 0 And Not (rowData Like "----------*" Or rowData Like "---*" Or rowData Like "----------------------------------------------------------------*") Then
+                                    ' Parse the SCN Synthetic Positions data
+                                    lineData = Split(rowData, vbTab)
+                                    If UBound(lineData) >= 6 Then ' Need at least 7 columns for full data
+                                        Dim scnRow(7) As String ' 8 columns (0-7) to hold all data
+                                        For k = 0 To 7
+                                            If k <= UBound(lineData) Then
+                                                scnRow(k) = Trim(lineData(k))
+                                            Else
+                                                scnRow(k) = ""
+                                            End If
+                                        Next k
+                                        
+                                        ' Only add if first column has a currency pair (6 letters)
+                                        If Len(scnRow(0)) >= 6 Then
+                                            scnSyntheticData.Add scnRow
+                                        End If
+                                    End If
+                                End If
+                            End If
+                            
+                            ' Find Risk Cashflow Data (Section K)
+                            If rowData Like "K. RISK CASHFLOW*" Then startRiskCashflow = True
+                            If rowData Like "L. SEPARATED DIGITAL*" Then endRiskCashflow = True
+                            If startRiskCashflow And Not endRiskCashflow And rowData Like "Total*" Then
+                                lineData = Split(rowData, vbTab)
+                                If UBound(lineData) >= 6 Then
+                                    Dim totalRow(2) As Variant
+                                    totalRow(0) = lineData(2) ' CcyPair
+                                    totalRow(1) = lineData(4) ' Risk Ccy
+                                    exposureString = Trim(lineData(6))
+                                    exposureString = Replace(exposureString, ",", "")
+                                    If IsNumeric(exposureString) Then totalRow(2) = CDbl(exposureString) Else totalRow(2) = 0
+                                    dataCollection.Add totalRow
+                                End If
+                            End If
+                        End If
+                    Next i
+                    
+                    ' --- Prepare and Write Data In-Place ---
+
+                    ' Determine size of the array for writing
+                    If dataCollection.Count = 0 Then
+                        ReDim totalData(1 To 1, 1 To 9) ' Now 9 columns (A-I)
+                    Else
+                        ReDim totalData(1 To dataCollection.Count, 1 To 9)
+                    End If
+
+                    ' Store display versions of CcyPairs for matching
+                    Dim displayCcyPairs() As String
+                    ReDim displayCcyPairs(1 To dataCollection.Count)
+                    
+                    For i = 1 To UBound(totalData, 1)
+                        ' Populate ClientID and CoverRatio only for the first row
+                        If i = 1 Then
+                            totalData(i, 1) = clientIDValue ' Use the ID from Column A
+                            totalData(i, 2) = Int(coverRatio)
+                        Else
+                            totalData(i, 1) = ""
+                            totalData(i, 2) = ""
+                        End If
+                        
+                        ' Populate other columns only if cashflow data exists
+                        If dataCollection.Count > 0 Then
+                            Dim originalCcyPair As String
+                            originalCcyPair = dataCollection(i)(0) ' Original CcyPair
+                            
+                            ' Apply DISPLAY FLIP logic to get what's shown in column C
+                            Dim displayCcyPair As String
+                            displayCcyPair = originalCcyPair ' Start with original
+                            
+                            ' Check if this pair needs to be flipped for display
+                            For k = 1 To ToFlipTable.Count
+                                currentFlipEntry = ToFlipTable(k)
+                                
+                                If originalCcyPair = currentFlipEntry(0) Then
+                                    ' This pair is in the ToFlipTable, so flip it for display
+                                    If Len(originalCcyPair) = 6 Then
+                                        displayCcyPair = Right(originalCcyPair, 3) & Left(originalCcyPair, 3)
+                                    End If
+                                    Exit For
+                                End If
+                            Next k
+                            
+                            ' Store the display version
+                            displayCcyPairs(i) = displayCcyPair
+                            totalData(i, 3) = displayCcyPair ' Column C shows flipped version
+                            
+                            totalData(i, 7) = dataCollection(i)(1) ' Risk Ccy (now column G)
+                            totalData(i, 8) = dataCollection(i)(2) ' Exposure(RiskCcy) (now column H)
+                            
+                            ' Apply manipulation logic for exposure calculation
+                            ccyPair = originalCcyPair ' Use original for calculation
+                            
+                            For k = 1 To ToFlipTable.Count
+                                currentFlipEntry = ToFlipTable(k)
+                                
+                                If ccyPair = currentFlipEntry(0) Then
+                                    divRate = 1: mulRate = 1
+                                    divCurrency = currentFlipEntry(1)
+                                    mulCurrency = currentFlipEntry(2)
+                                    originalExposure = totalData(i, 8)
+                                    
+                                    For Each key In fxRates.Keys
+                                        If key = divCurrency Then divRate = fxRates(key)
+                                        If key = mulCurrency Then mulRate = fxRates(key)
+                                        If key = 1 Then
+                                            mulRate = -1
+                                            divRate = 1
+                                        End If
+                                        If key = -1 Then
+                                            mulRate = 1
+                                            divRate = 1
+                                        End If
+                                    Next key
+                                    
+                                    If divRate <> 0 And mulRate <> 0 Then
+                                        manipulatedExposure = (originalExposure / divRate) * mulRate * -1
+                                        totalData(i, 9) = manipulatedExposure ' Manipulated Exposure (column I)
+                                    End If
+                                    
+                                    Exit For
+                                End If
+                            Next k
+                            
+                            ' Populate the "Delta (mio)" column (column D)
+                            If Not IsEmpty(totalData(i, 9)) And IsNumeric(totalData(i, 9)) Then
+                                valueForMio = CDbl(totalData(i, 9))
+                            ElseIf IsNumeric(totalData(i, 8)) Then
+                                valueForMio = CDbl(totalData(i, 8))
+                            Else
+                                valueForMio = 0
+                            End If
+                            totalData(i, 4) = Round(valueForMio / 1000000, 1)
+                            
+                            ' Initialize Synth. Exp. column (column E) - will be populated later
+                            totalData(i, 5) = 0
+                        End If
+                    Next i
+                    
+                    ' --- NEW: Process SCN Synthetic Positions Data for Synthetic Exposure ---
+                    If Not singleCurrencySuppressed And scnSyntheticData.Count > 0 Then
+                        ' Process each currency pair from the main data
+                        For i = 1 To UBound(totalData, 1)
+                            If dataCollection.Count > 0 Then
+                                ' Get the DISPLAYED CcyPair (what's shown in column C)
+                                Dim displayedCcyPair As String
+                                displayedCcyPair = displayCcyPairs(i)
+                                
+                                ' Get the ORIGINAL CcyPair (from Section K data)
+                                Dim originalCcyPairForMatch As String
+                                originalCcyPairForMatch = dataCollection(i)(0)
+                                
+                                ' Debug: Add to error column for verification
+                                Dim debugInfo As String
+                                debugInfo = "Display: " & displayedCcyPair & ", Original: " & originalCcyPairForMatch
+                                
+                                ' Look for matching data in SCN Synthetic Positions
+                                Dim foundMatch As Boolean
+                                foundMatch = False
+                                Dim matchedTSVPair As String
+                                Dim wasFlippedForMatch As Boolean
+                                
+                                For k = 1 To scnSyntheticData.Count
+                                    Dim scnRowData() As String
+                                    scnRowData = scnSyntheticData(k)
+                                    
+                                    ' Check if we have valid data
+                                    If UBound(scnRowData) >= 6 Then
+                                        Dim tsvCurrencyPair As String
+                                        tsvCurrencyPair = scnRowData(0)
+                                        
+                                        ' Try to match against DISPLAYED pair
+                                        ' Also try flipped version if needed
+                                        Dim tsvFlippedPair As String
+                                        If Len(tsvCurrencyPair) = 6 Then
+                                            tsvFlippedPair = Right(tsvCurrencyPair, 3) & Left(tsvCurrencyPair, 3)
+                                        Else
+                                            tsvFlippedPair = ""
+                                        End If
+                                        
+                                        ' Check for match
+                                        If tsvCurrencyPair = displayedCcyPair Then
+                                            foundMatch = True
+                                            matchedTSVPair = tsvCurrencyPair
+                                            wasFlippedForMatch = False
+                                        ElseIf tsvFlippedPair = displayedCcyPair Then
+                                            foundMatch = True
+                                            matchedTSVPair = tsvCurrencyPair ' Keep original TSV pair
+                                            wasFlippedForMatch = True
+                                        End If
+                                        
+                                        If foundMatch Then
+                                            ' Extract target currency (first 3 letters of DISPLAYED CcyPair)
+                                            Dim targetCurrency As String
+                                            targetCurrency = Left(displayedCcyPair, 3)
+                                            
+                                            ' Find which column contains the target currency
+                                            Dim syntheticExposure As Double
+                                            syntheticExposure = 0
+                                            Dim amountValue As String
+                                            Dim position As String
+                                            
+                                            ' Check Column 3 (index 2-3: position and currency)
+                                            If scnRowData(3) = targetCurrency Then
+                                                ' Found in Column 3
+                                                amountValue = scnRowData(4)
+                                                position = scnRowData(2)
+                                                debugInfo = debugInfo & " | TSV: " & tsvCurrencyPair & " " & position & " " & scnRowData(3) & " " & amountValue
+                                                
+                                            ' Check Column 6 (index 5-6: position and currency)  
+                                            ElseIf scnRowData(6) = targetCurrency Then
+                                                ' Found in Column 6
+                                                amountValue = scnRowData(7)
+                                                position = scnRowData(5)
+                                                debugInfo = debugInfo & " | TSV: " & tsvCurrencyPair & " " & position & " " & scnRowData(6) & " " & amountValue
+                                            Else
+                                                ' Currency not found in either column
+                                                debugInfo = debugInfo & " | ERROR: " & targetCurrency & " not found"
+                                                errorMessages.Add "Client: " & clientIDValue & ", CcyPair: " & displayedCcyPair & ", Error: " & targetCurrency & " not found in position columns"
+                                                Exit For
+                                            End If
+                                            
+                                            ' CRITICAL FIX: When the TSV pair was flipped to match the displayed pair,
+                                            ' we need to REVERSE the position!
+                                            ' Example: TSV has JPYUSD (SHORT JPY, LONG USD)
+                                            ' Display has USDJPY (flipped)
+                                            ' For USDJPY, we look at USD (target currency)
+                                            ' In JPYUSD row, USD position is LONG
+                                            ' But for USDJPY display, this should be SHORT!
+                                            If wasFlippedForMatch Then
+                                                ' Reverse the position when pair is flipped
+                                                If position = "LONG" Then
+                                                    position = "SHORT"
+                                                ElseIf position = "SHORT" Then
+                                                    position = "LONG"
+                                                End If
+                                                debugInfo = debugInfo & " | Flipped-> " & position
+                                            End If
+                                            
+                                            ' Parse amount (remove commas)
+                                            amountValue = Replace(amountValue, ",", "")
+                                            If IsNumeric(amountValue) Then
+                                                syntheticExposure = CDbl(amountValue)
+                                                
+                                                ' Apply SHORT/LONG sign
+                                                If UCase(position) = "SHORT" Then
+                                                    syntheticExposure = -syntheticExposure
+                                                ' LONG is positive, no change needed
+                                                End If
+                                                
+                                                ' Convert to millions and round to 1 decimal
+                                                syntheticExposure = Round(syntheticExposure / 1000000, 1)
+                                                
+                                                ' Store in Synth. Exp. column (E)
+                                                totalData(i, 5) = syntheticExposure
+                                                debugInfo = debugInfo & " | Synth: " & syntheticExposure
+                                            Else
+                                                debugInfo = debugInfo & " | ERROR: Invalid amount"
+                                                errorMessages.Add "Client: " & clientIDValue & ", CcyPair: " & displayedCcyPair & ", Error: Invalid amount format: " & amountValue
+                                            End If
+                                            
+                                            ' Add debug info to error column
+                                            errorMessages.Add debugInfo
+                                            
+                                            Exit For
+                                        End If
+                                    End If
+                                Next k
+                                
+                                ' If no match found and there's SCN data, it means this currency pair isn't in Section D
+                                ' Keep it as 0 (which is what we initialized it to)
+                                If Not foundMatch Then
+                                    debugInfo = debugInfo & " | No match in Section D"
+                                    errorMessages.Add debugInfo
+                                End If
+                            End If
+                        Next i
+                    ElseIf singleCurrencySuppressed Then
+                        ' Single Currency Netting Suppressed - set all Synthetic Exposure to 0
+                        For i = 1 To UBound(totalData, 1)
+                            totalData(i, 5) = 0
+                        Next i
+                        errorMessages.Add "Client: " & clientIDValue & ", Info: Single currency netting suppressed, all synthetic exposures set to 0"
+                    Else
+                        ' No SCN data found at all
+                        For i = 1 To UBound(totalData, 1)
+                            If dataCollection.Count > 0 Then
+                                Dim displayedPair As String
+                                displayedPair = displayCcyPairs(i)
+                                errorMessages.Add "Client: " & clientIDValue & ", CcyPair: " & displayedPair & ", Info: No SCN data in file"
+                            End If
+                        Next i
+                    End If
+                    
+                    ' Write main data block
+                    ws.Cells(currentRow, 1).Resize(UBound(totalData, 1), UBound(totalData, 2)).Value = totalData
+                    rowsWritten = UBound(totalData, 1)
+                    
+                    ' Write error messages to column R
+                    If errorMessages.Count > 0 Then
+                        For k = 1 To errorMessages.Count
+                            ws.Cells(currentRow + k - 1, 18).Value = errorMessages(k)
+                        Next k
+                        rowsWritten = Application.Max(rowsWritten, errorMessages.Count)
+                    End If
+                    
+                    ' Write FX rate data block to columns K & L (11 & 12)
+                    If fxRates.Count > 0 Then
+                        ReDim fxData(1 To fxRates.Count, 1 To 2)
+                        i = 1
+                        For Each key In fxRates.Keys
+                            fxData(i, 1) = key
+                            fxData(i, 2) = fxRates(key)
+                            i = i + 1
+                        Next key
+                        ' Start writing FX data at the same row as the main block data
+                        ws.Cells(currentRow, 11).Resize(UBound(fxData, 1), UBound(fxData, 2)).Value = fxData
+                        rowsWritten = Application.Max(rowsWritten, UBound(fxData, 1))
+                    End If
+                    
+                    ' --- Clean up old data and set cursor for next loop ---
+                    
+                    ' Find the row where the next ClientID is listed (or end of sheet)
+                    nextClientIDRow = currentRow + 1
+                    Do While nextClientIDRow <= lastRow And Len(Trim(ws.Cells(nextClientIDRow, 1).Value)) = 0
+                        nextClientIDRow = nextClientIDRow + 1
+                    Loop
+                    
+                    ' Calculate the area of old data to clear
+                    oldBlockEndRow = nextClientIDRow - 1
+                    
+                    ' Clear old content in columns A:R if the new data is shorter
+                    If currentRow + rowsWritten <= oldBlockEndRow Then
+                        ws.Range(ws.Cells(currentRow + rowsWritten, 1), ws.Cells(oldBlockEndRow, 18)).ClearContents
+                    End If
+                    
+                    ' Set currentRow to the row of the next ClientID found
+                    currentRow = nextClientIDRow
+                
+                Else
+                    ' ClientID is not empty, but we don't have a matching file (or it's an empty cell)
+                    currentRow = currentRow + 1
+                End If
+            Loop
+            
+            ' Clean up after last client
+            lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+            If currentRow + 2 <= lastRow Then
+                ws.Range("A" & currentRow + 2 & ":B" & lastRow).ClearContents
+            End If
+            
+            ' Add reference formulas
+            ws.Cells(currentRow + 3, 1).Value = "Spot ref: Spot/Forward/Cash"
+            ws.Cells(currentRow + 4, 1).Value = "USDJPY:"
+            ws.Cells(currentRow + 5, 1).Value = "GBPJPY:"
+            ws.Cells(currentRow + 7, 1).Value = "Spot ref: Structures"
+            ws.Cells(currentRow + 8, 1).Value = "USDJPY:"
+            ws.Cells(currentRow + 9, 1).Value = "GBPJPY:"
+            
+            With ws.Cells(currentRow + 4, 2)
+                .Formula = "=L5" ' Now column L instead of K
+                .NumberFormat = "0.00"
+                .HorizontalAlignment = xlLeft
+            End With
+            
+            With ws.Cells(currentRow + 5, 2)
+                .Formula = "=L5*L4" ' Now column L instead of K
+                .NumberFormat = "0.00"
+                .HorizontalAlignment = xlLeft
+            End With
+            
+            ' Final formatting
+            ws.Range("A:R").Columns.AutoFit
+            
+        Else
+            MsgBox "No file selected.", vbExclamation
+        End If
+    End With
+    
+    MsgBox "Data update complete on sheet 'ContRisk3'!", vbInformation
+    
+End Sub
