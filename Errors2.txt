@@ -1,0 +1,47 @@
+
+ID1 - Section D as follows
+GBPJPY	26JAN26	LONG	GBP	 9,666,043.85	SHORT	JPY	 9,676,580
+ 
+JPYUSD	26JAN26	SHORT	JPY	 157,395	LONG	USD	 157,217.65
+
+ID1 Table shows 
+GBPJPY 9.70 (correct)
+GBPUSD 0.00 (correct)
+USDJPY -0.20 (wrong sign)
+
+ID2 - Section D as follows
+GBPJPY	26JAN26	LONG	GBP	 3,778,853.40	SHORT	JPY	 3,721,174
+ 
+GBPUSD	26JAN26	LONG	GBP	 42,188.35	SHORT	USD	 41,095.86
+
+ID2 Table shows 
+GBPJPY 3.80 (correct)
+GBPUSD 0.00 (correct)
+USDJPY 0.00 (correct)
+
+ID3 - Section D as follows
+  <*** SINGLE CURRENCY NETTING SUPPRESSED ***>
+ID3Table shows 
+GBPJPY 0.00 (correct)
+GBPUSD 0.00 (correct)
+USDJPY 0.00 (correct)
+
+ID4 - Section D as follows
+GBPJPY	27JAN26	SHORT	GBP	 8,479,234.56	LONG	JPY	 8,500,518
+ 
+JPYUSD	27JAN26	LONG	JPY	 7,531,159	SHORT	USD	 7,512,252.47
+
+ID4 Table shows 
+GBPJPY 8.50 (correct)
+GBPUSD 0.00 (correct)
+USDJPY 7.50 (wrong sign)
+
+ID5 - Section D as follows
+GBPJPY	27JAN26	LONG	GBP	 9,882,133.49	SHORT	JPY	 9,857,244
+ 
+GBPUSD	27JAN26	LONG	GBP	 181,372.30	SHORT	USD	 180,883.54
+
+ID5 Table shows 
+GBPJPY 9.90 (correct)
+GBPUSD 0.20 (correct)
+USDJPY 0.00 (correct)
