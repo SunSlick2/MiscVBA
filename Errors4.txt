@@ -1,0 +1,166 @@
+
+ID1 - Section D as follows
+GBPJPY	26JAN26	LONG	GBP	 9,666,043.85	SHORT	JPY	 9,676,580
+ 
+JPYUSD	26JAN26	SHORT	JPY	 157,395	LONG	USD	 157,217.65
+
+ID1 Table shows 
+GBPJPY 9.70 (correct)
+GBPUSD 0.00 (correct)
+USDJPY -0.20 (still wrong sign)
+
+ID2 - Section D as follows
+GBPJPY	26JAN26	LONG	GBP	 3,778,853.40	SHORT	JPY	 3,721,174
+ 
+GBPUSD	26JAN26	LONG	GBP	 42,188.35	SHORT	USD	 41,095.86
+
+ID2 Table shows 
+GBPJPY 3.80 (correct)
+GBPUSD 0.00 (correct)
+USDJPY 0.00 (correct)
+
+ID3 - Section D as follows
+  <*** SINGLE CURRENCY NETTING SUPPRESSED ***>
+ID3Table shows 
+GBPJPY 0.00 (correct)
+GBPUSD 0.00 (correct)
+USDJPY 0.00 (correct)
+
+ID4 - Section D as follows
+GBPJPY	27JAN26	SHORT	GBP	 8,479,234.56	LONG	JPY	 8,500,518
+ 
+JPYUSD	27JAN26	LONG	JPY	 7,531,159	SHORT	USD	 7,512,252.47
+
+ID4 Table shows 
+GBPJPY -8.50 (now wrong, was correct earlier)
+GBPUSD 0.00 (correct)
+USDJPY 7.50 (still wrong sign)
+
+ID5 - Section D as follows
+GBPJPY	27JAN26	LONG	GBP	 9,882,133.49	SHORT	JPY	 9,857,244
+ 
+GBPUSD	27JAN26	LONG	GBP	 181,372.30	SHORT	USD	 180,883.54
+
+ID5 Table shows 
+GBPJPY 9.90 (correct)
+GBPUSD 0.20 (correct)
+USDJPY 0.00 (correct)
+
+Debug info as follows
+
+Client ID1 - Added SCN row: GBPJPY | Pos1: LONG GBP Amt1: 9,666,043.85 | Pos2: SHORT JPY Amt2: 9,676,580
+Client ID1 - Added SCN row: JPYUSD | Pos1: SHORT JPY Amt1: 157,395 | Pos2: LONG USD Amt2: 157,217.65
+Processing SCN data for client: ID1
+Spreadsheet CcyPairs: 
+  - GBPJPY
+  - GBPUSD
+  - JPYUSD (wrong, should be USDJPY)
+Looking for match for: GBPJPY
+  Direct match found with: GBPJPY
+  Target currency: GBP
+  TSV data: LONG GBP 9,666,043.85 | SHORT JPY 9,676,580
+  Found in Column 3: LONG GBP Amount: 9,666,043.85
+  Amount before sign: 9666043.85
+  Applied LONG -> Positive: 9666043.85
+  After conversion to millions: 9.7
+  Final synthetic exposure for GBPJPY: 9.7
+Looking for match for: GBPUSD
+  No match found for GBPUSD, keeping 0
+Looking for match for: JPYUSD
+  Direct match found with: JPYUSD
+  Target currency: JPY
+  TSV data: SHORT JPY 157,395 | LONG USD 157,217.65
+  Found in Column 3: SHORT JPY Amount: 157,395
+  Amount before sign: 157395
+  Applied SHORT -> Negative: -157395
+  After conversion to millions: -0.2
+  Final synthetic exposure for JPYUSD: -0.2
+Client ID2 - Added SCN row: GBPJPY | Pos1: LONG GBP Amt1: 3,778,853.40 | Pos2: SHORT JPY Amt2: 3,721,174
+Client ID2 - Added SCN row: GBPUSD | Pos1: LONG GBP Amt1: 42,188.35 | Pos2: SHORT USD Amt2: 41,095.86
+Processing SCN data for client: ID2
+Spreadsheet CcyPairs: 
+  - GBPJPY
+  - GBPUSD
+  - JPYUSD (wrong, should be USDJPY. shows correctly in the spreadsheet)
+Looking for match for: GBPJPY
+  Direct match found with: GBPJPY
+  Target currency: GBP
+  TSV data: LONG GBP 3,778,853.40 | SHORT JPY 3,721,174
+  Found in Column 3: LONG GBP Amount: 3,778,853.40
+  Amount before sign: 3778853.4
+  Applied LONG -> Positive: 3778853.4
+  After conversion to millions: 3.8
+  Final synthetic exposure for GBPJPY: 3.8
+Looking for match for: GBPUSD
+  Direct match found with: GBPUSD
+  Target currency: GBP
+  TSV data: LONG GBP 42,188.35 | SHORT USD 41,095.86
+  Found in Column 3: LONG GBP Amount: 42,188.35
+  Amount before sign: 42188.35
+  Applied LONG -> Positive: 42188.35
+  After conversion to millions: 0
+  Final synthetic exposure for GBPUSD: 0
+Looking for match for: JPYUSD
+  No match found for JPYUSD, keeping 0
+Single currency netting suppressed for client: ID3
+Client ID4 - Added SCN row: GBPJPY | Pos1: SHORT GBP Amt1: 8,479,234.56 | Pos2: LONG JPY Amt2: 8,500,518
+Client ID4 - Added SCN row: JPYUSD | Pos1: LONG JPY Amt1: 7,531,159 | Pos2: SHORT USD Amt2: 7,512,252.47
+Processing SCN data for client: ID4
+Spreadsheet CcyPairs: 
+  - GBPJPY
+  - GBPUSD
+  - JPYUSD (wrong, should be USDJPY. shows correctly in the spreadsheet)
+Looking for match for: GBPJPY
+  Direct match found with: GBPJPY
+  Target currency: GBP
+  TSV data: SHORT GBP 8,479,234.56 | LONG JPY 8,500,518
+  Found in Column 3: SHORT GBP Amount: 8,479,234.56
+  Amount before sign: 8479234.56
+  Applied SHORT -> Negative: -8479234.56
+  After conversion to millions: -8.5
+  Final synthetic exposure for GBPJPY: -8.5
+Looking for match for: GBPUSD
+  No match found for GBPUSD, keeping 0
+Looking for match for: JPYUSD
+  Direct match found with: JPYUSD
+  Target currency: JPY
+  TSV data: LONG JPY 7,531,159 | SHORT USD 7,512,252.47
+  Found in Column 3: LONG JPY Amount: 7,531,159
+  Amount before sign: 7531159
+  Applied LONG -> Positive: 7531159
+  After conversion to millions: 7.5
+  Final synthetic exposure for JPYUSD: 7.5
+Client ID5 - Added SCN row: GBPJPY | Pos1: LONG GBP Amt1: 9,882,133.49 | Pos2: SHORT JPY Amt2: 9,857,244
+Client ID5 - Added SCN row: GBPUSD | Pos1: LONG GBP Amt1: 181,372.30 | Pos2: SHORT USD Amt2: 180,883.54
+Processing SCN data for client: ID5
+Spreadsheet CcyPairs: 
+  - GBPJPY
+  - GBPUSD
+  - JPYUSD (wrong, should be USDJPY. shows correctly in the spreadsheet)
+Looking for match for: GBPJPY
+  Direct match found with: GBPJPY
+  Target currency: GBP
+  TSV data: LONG GBP 9,882,133.49 | SHORT JPY 9,857,244
+  Found in Column 3: LONG GBP Amount: 9,882,133.49
+  Amount before sign: 9882133.49
+  Applied LONG -> Positive: 9882133.49
+  After conversion to millions: 9.9
+  Final synthetic exposure for GBPJPY: 9.9
+Looking for match for: GBPUSD
+  Direct match found with: GBPUSD
+  Target currency: GBP
+  TSV data: LONG GBP 181,372.30 | SHORT USD 180,883.54
+  Found in Column 3: LONG GBP Amount: 181,372.30
+  Amount before sign: 181372.3
+  Applied LONG -> Positive: 181372.3
+  After conversion to millions: 0.2
+  Final synthetic exposure for GBPUSD: 0.2
+Looking for match for: JPYUSD 
+  No match found for JPYUSD, keeping 0
+Client EM636568 - Added SCN row: AUDUSD | Pos1: SHORT AUD Amt1: 974,199.03 | Pos2: LONG USD Amt2: 971,452.91
+Client EM636568 - Added SCN row: USDXAU | Pos1: LONG USD Amt1: 354,830.66 | Pos2: SHORT XAU Amt2: 355,830.64
+Client EM636568 - Added SCN row: CHFUSD | Pos1: SHORT CHF Amt1: 96,358.36 | Pos2: LONG USD Amt2: 96,089.35
+Processing SCN data for client: EM636568
+Spreadsheet CcyPairs: 
+Single currency netting suppressed for client: EM642198
+
