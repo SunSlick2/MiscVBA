@@ -1,0 +1,25 @@
+ 	Set rng = Nothing
+    Select Case ActiveSheet.Name
+        Case "ContRisk2"
+        CheckCol = "M"
+        SOVCol = "E"
+        PrevCol = "D"
+    Set ws = ThisWorkbook.Sheets("ContRisk2") ' Change "Sheet1" to the name of your sheet
+        Case "ContRisk3"
+        CheckCol = "N"
+        SOVCol = "F"
+        PrevCol = "E"
+    Set ws = ThisWorkbook.Sheets("ContRisk3") ' Change "Sheet1" to the name of your sheet
+        Case Else
+        MsgBox "Wrong Sheet"
+    Exit Sub
+    
+    End Select
+    
+    lastRow = ws.Cells(ws.rows.Count, "A").End(xlUp).Row
+    ws.Select
+    If LCase(Range(CheckCol & "30").Value) = "x" Then
+        Set rng = ws.Range("A2:" & SOVCol & lastRow)
+        Else
+        Set rng = ws.Range("A2:" & PrevCol & lastRow)
+    End If
