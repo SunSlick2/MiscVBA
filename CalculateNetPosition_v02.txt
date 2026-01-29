@@ -1,0 +1,37 @@
+let
+    // Load your source table (Assumes table is named "Table1")
+    Source = Excel.CurrentWorkbook(){[Name="Table1"]}[Content],
+    
+    // 1. Filter for OPEN and CLOSED status
+    FilteredRows = Table.SelectRows(Source, each ([Status] = "OPEN" or [Status] = "CLOSED")),
+
+    // 2. Assign signs based on B/S using standard AddColumn to avoid "Field Not Found" errors
+    // AdjAmount1: Buy = +ve, Sell = -ve
+    AddAdjAmount1 = Table.AddColumn(FilteredRows, "AdjAmount1", each if [#"B/S"] = "B" then [Transacted] else -[Transacted], type number),
+    
+    // AdjAmount2: Buy = -ve, Sell = +ve
+    AddAdjAmount2 = Table.AddColumn(AddAdjAmount1, "AdjAmount2", each if [#"B/S"] = "B" then -[Settlement] else [Settlement], type number),
+
+    // 3. Extract Currency Components (Handling "Ccy Pair" with space)
+    AddFirst3 = Table.AddColumn(AddAdjAmount2, "first currency", each Text.Start([#"Ccy Pair"], 3), type text),
+    AddSecond3 = Table.AddColumn(AddFirst3, "second currency", each Text.End([#"Ccy Pair"], 3), type text),
+
+    // 4. Group and Calculate Totals
+    // This logic sums AdjAmount1 if it matches the currency, and AdjAmount2 if it matches the currency
+    GroupedPairs = Table.Group(AddSecond3, {"Ccy Pair", "first currency", "second currency"}, {
+        {"Total 3", (sub) => 
+            let 
+                T_Match = List.Sum(Table.SelectRows(sub, each [T] = [first currency])[AdjAmount1]),
+                S_Match = List.Sum(Table.SelectRows(sub, each [S] = [first currency])[AdjAmount2])
+            in 
+                List.Sum({T_Match, S_Match}), type number},
+        
+        {"Total 4", (sub) => 
+            let 
+                T_Match = List.Sum(Table.SelectRows(sub, each [T] = [second currency])[AdjAmount1]),
+                S_Match = List.Sum(Table.SelectRows(sub, each [S] = [second currency])[AdjAmount2])
+            in 
+                List.Sum({T_Match, S_Match}), type number}
+    })
+in
+    GroupedPairs
