@@ -1,0 +1,38 @@
+let
+    // Load your source table (Assumes table is named "Table1")
+    Source = Excel.CurrentWorkbook(){[Name="Table1"]}[Content],
+    
+    // Step 1: Filter for OPEN and CLOSED status
+    FilteredRows = Table.SelectRows(Source, each ([Status] = "OPEN" or [Status] = "CLOSED")),
+
+    // Step 2: Assign signs based on B/S
+    // If Buy: Transacted (Amount1) is +, Settlement (Amount2) is -
+    // If Sell: Transacted (Amount1) is -, Settlement (Amount2) is +
+    SignedAmounts = Table.TransformRows(FilteredRows, (r) => 
+        let 
+            AdjAmount1 = if r[#"B/S"] = "B" then r[Transacted] else -r[Transacted],
+            AdjAmount2 = if r[#"B/S"] = "B" then -r[Settlement] else r[Settlement]
+        in 
+            r & [AdjAmount1 = AdjAmount1, AdjAmount2 = AdjAmount2]
+    ),
+    ConvertedToTable = Table.FromRecords(SignedAmounts),
+
+    // Step 3 Helper: Extract Currency Components
+    AddCcyComponents = Table.AddColumn(ConvertedToTable, "First3", each Text.Start([CcyPair], 3)),
+    AddSecond3 = Table.AddColumn(AddCcyComponents, "Last3", each Text.End([CcyPair], 3)),
+
+    // Step 3 & 4: Grouping and Aggregating
+    // We calculate the net for the First 3 letters and the Last 3 letters separately
+    GroupedPairs = Table.Group(AddSecond3, {"CcyPair", "First3", "Last3"}, {
+        {"Total 3", each 
+            List.Sum(Table.SelectRows(_, (inner) => inner[T] = inner[First3])[AdjAmount1]) + 
+            List.Sum(Table.SelectRows(_, (inner) => inner[S] = inner[First3])[AdjAmount2]), type number},
+        {"Total 4", each 
+            List.Sum(Table.SelectRows(_, (inner) => inner[T] = inner[Last3])[AdjAmount1]) + 
+            List.Sum(Table.SelectRows(_, (inner) => inner[S] = inner[Last3])[AdjAmount2]), type number}
+    }),
+
+    // Final Formatting
+    RenameColumns = Table.RenameColumns(GroupedPairs,{{"First3", "first currency"}, {"Last3", "second currency"}})
+in
+    RenameColumns
