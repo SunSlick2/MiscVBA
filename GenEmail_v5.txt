@@ -1,0 +1,290 @@
+
+Sub GenerateClientEmailsv5()
+    
+    Dim clientData As Scripting.Dictionary
+    Dim currencyData As Scripting.Dictionary
+    
+    Dim eMailMaster As Scripting.Dictionary
+    Dim eMailCcyDeet As Scripting.Dictionary
+    Dim eMailFixDeet As Collection
+    
+    Dim posData As Variant
+    Dim results As Variant
+    
+    Dim wsControl As Worksheet
+    Dim wsPosition As Worksheet
+    
+    Dim i As Long
+    Dim currentClient As String
+  
+    Dim lastRowCurrencies As Double
+    Dim lastRowClients As Double
+    
+    Dim StructFlag As Boolean
+    Dim TargetApplicableFlag As Boolean
+    
+    Dim LS As String, IOTM As String
+    Dim FixAmt As Double, ActiveStrike As Double, RemainingTarget As Variant
+    Dim DOWFilter As String
+    
+    Dim logFilePath As String
+    Dim todayDate As String
+    todayDate = Format(Date, "yymmdd")
+    
+    logFilePath = logPath & todayDate & ".txt"
+    
+    Dim tradeTotals As Object
+    Set tradeTotals = CreateObject("Scripting.Dictionary")
+    
+    Dim LogFixAmount As Double, LogCounterCCYAmount As Double
+    Dim LogKey As String, LogexistingValues As Variant
+
+    Set clientData = New Scripting.Dictionary
+    Set currencyData = New Scripting.Dictionary
+
+    Set wsControl = ThisWorkbook.Sheets("Control")
+    Set wsPosition = ThisWorkbook.Sheets("Position")
+    
+    wsControl.Select
+    
+    ' Populate client data dictionary from Control sheet (Columns K-Q)
+    lastRowClients = wsControl.Cells(wsControl.Rows.Count, "K").End(xlUp).row
+    For i = 2 To lastRowClients
+        If (wsControl.Cells(i, 10).value = "Y") Then
+            clientData(wsControl.Cells(i, 11).value) = Array(wsControl.Cells(i, 12).value, _
+                                                            wsControl.Cells(i, 13).value, _
+                                                            wsControl.Cells(i, 14).value, _
+                                                            wsControl.Cells(i, 15).value, _
+                                                            wsControl.Cells(i, 16).value, _
+                                                            wsControl.Cells(i, 17).value)
+        End If
+    Next i
+
+    ' Populate ALL currencies into dictionary to track Y/N status and allow missing check
+    lastRowCurrencies = wsControl.Cells(wsControl.Rows.Count, "B").End(xlUp).row
+    For i = 2 To lastRowCurrencies
+        If IsNumeric(wsControl.Cells(i, 4).value) And IsDate(wsControl.Cells(i, 5).value) Then
+            ' Array index 1 now stores the "Y/N" flag from Column B
+            currencyData(wsControl.Cells(i, 3).value) = Array(wsControl.Cells(i, 2).value, _
+                                                              wsControl.Cells(i, 4).value, _
+                                                              wsControl.Cells(i, 5).value, _
+                                                              wsControl.Cells(i, 6).value, _
+                                                              wsControl.Cells(i, 7).value, _
+                                                              wsControl.Cells(i, 8).value)
+        Else
+            MsgBox "Problem with Fixing Data at row " & i
+            Exit Sub
+        End If
+    Next i
+    
+    ' Load DOW filter from Control sheet
+    DOWFilter = wsControl.Cells(2, 1).value
+    
+    ' Filter and Sort ClientPositions
+    wsPosition.Select
+    Call FixDOW(DOWFilter)
+    Call SortCustomer
+    
+    ' Load ClientPositions into posData array
+    wsControl.Activate
+    Dim lastRowPosition As Long
+    lastRowPosition = wsPosition.Cells(wsPosition.Rows.Count, 1).End(xlUp).row
+    Dim FilteredData As Range
+    Dim SelectedData As Variant
+    Set FilteredData = wsPosition.Range("A7:T" & lastRowPosition).SpecialCells(xlCellTypeVisible)
+    Dim PosRow As Double
+    Dim aCnt As Double
+    Dim rCnt As Double
+    Dim PosRecordCount As Double
+
+    PosRecordCount = 0
+    For aCnt = 1 To FilteredData.Areas.Count
+        PosRecordCount = PosRecordCount + FilteredData.Areas(aCnt).Rows.Count
+    Next aCnt
+    ReDim SelectedData(1 To PosRecordCount, 1 To 20)
+    PosRow = 1
+    For aCnt = 1 To FilteredData.Areas.Count
+        For rCnt = 1 To FilteredData.Areas(aCnt).Rows.Count
+              For i = 1 To 20
+                SelectedData(PosRow, i) = FilteredData.Areas(aCnt).Cells(rCnt, i).value
+              Next i
+              PosRow = PosRow + 1
+        Next rCnt
+    Next aCnt
+    posData = SelectedData
+
+    ' Pre-Validation: Check for currencies in Position that are missing in Control
+    Dim missingCcy As Object
+    Set missingCcy = CreateObject("Scripting.Dictionary")
+    For i = 1 To UBound(posData, 1)
+        ' Check missingness only for the clients we are tracking
+        If clientData.Exists(posData(i, 1)) Then
+            If Not currencyData.Exists(posData(i, 2)) Then
+                missingCcy(posData(i, 2)) = True
+            End If
+        End If
+    Next i
+
+    If missingCcy.Count > 0 Then
+        MsgBox "The following currencies are missing from the Control sheet: " & vbCrLf & _
+               Join(missingCcy.Keys, vbCrLf), vbCritical, "Configuration Error"
+        Exit Sub
+    End If
+ 
+    Set eMailMaster = New Scripting.Dictionary
+    
+    ' Loop through posData to generate email content
+    For i = 1 To UBound(posData, 1)
+        ' Only process if Client is 'Y' AND Currency is 'Y'
+        If clientData.Exists(posData(i, 1)) Then
+            currentClient = posData(i, 1)
+            Dim currencykey As String
+            currencykey = posData(i, 2)
+            
+            ' Check the status flag stored in index 1
+            If currencyData(currencykey)(1) = "Y" Then
+                
+                results = FixDirectionAmtTargetRemIOTMv2(CStr(posData(i, 3)), CStr(posData(i, 6)), _
+                            CDbl(posData(i, 8)), CDbl(posData(i, 9)), CDbl(posData(i, 10)), _
+                            CDbl(posData(i, 11)), CDbl(posData(i, 12)), CDbl(posData(i, 13)), _
+                            CDbl(posData(i, 14)), CDate(posData(i, 16)), CStr(posData(i, 17)), _
+                            CDbl(currencyData(currencykey)(2)))
+                
+                LS = results(1)
+                IOTM = results(2)
+                ' Indices shifted +1 because flag is at (1)
+                FixAmt = results(3) * currencyData(currencykey)(5)
+                ActiveStrike = results(4)
+                RemainingTarget = results(5) * currencyData(currencykey)(6)
+                StructFlag = results(6)
+                TargetApplicableFlag = results(7)
+                
+                Dim emailFixingContent As String
+                Dim eMailCcyContent As String
+                
+                eMailCcyContent = currencykey & " Fix " & currencyData(currencykey)(2) & " Value date " & Format(currencyData(currencykey)(3), "dd-mmm-yyyy")
+                emailFixingContent = CreateFixingNarration(LS, currencykey, FixAmt, ActiveStrike, CDbl(currencyData(currencykey)(2)), IOTM, RemainingTarget, TargetApplicableFlag, _
+                                     clientData(currentClient)(1) = "Y", currencyData(currencykey)(4) = "Y", clientData(currentClient)(2) = "Y")
+                        
+                If Not eMailMaster.Exists(currentClient) Then
+                    Set eMailCcyDeet = New Scripting.Dictionary
+                    Set eMailFixDeet = New Collection
+                    eMailCcyDeet.Add currencykey, eMailCcyContent
+                    eMailFixDeet.Add emailFixingContent
+                    eMailMaster.Add currentClient, Array(eMailCcyDeet, eMailFixDeet)
+                Else
+                    Set eMailCcyDeet = eMailMaster(currentClient)(1)
+                    Set eMailFixDeet = eMailMaster(currentClient)(2)
+                    
+                    If Not eMailCcyDeet.Exists(currencykey) Then
+                        eMailCcyDeet.Add currencykey, eMailCcyContent
+                    End If
+                    eMailFixDeet.Add emailFixingContent
+                End If
+                
+                ' Log aggregation
+                LogFixAmount = FixAmt
+                Select Case LS
+                    Case "L": LogFixAmount = Abs(LogFixAmount)
+                    Case "S": LogFixAmount = -Abs(LogFixAmount)
+                    Case Else: LogFixAmount = 0
+                End Select
+                
+                LogCounterCCYAmount = -LogFixAmount * ActiveStrike
+                LogKey = currentClient & "|" & currencykey
+                
+                If tradeTotals.Exists(LogKey) Then
+                    LogexistingValues = tradeTotals(LogKey)
+                    tradeTotals(LogKey) = Array(LogexistingValues(1) + LogFixAmount, LogexistingValues(2) + LogCounterCCYAmount)
+                Else
+                    tradeTotals(LogKey) = Array(LogFixAmount, LogCounterCCYAmount)
+                End If
+            End If
+        End If
+    Next i
+
+    ' Write to Log File
+    Dim fileContent As String, entry As String
+    Dim tradeLogKey As Variant
+    fileContent = ""
+    For Each tradeLogKey In tradeTotals.Keys
+        LogexistingValues = tradeTotals(tradeLogKey)
+        entry = Split(tradeLogKey, "|")(0) & " | " & _
+                Split(tradeLogKey, "|")(1) & " | " & _
+                Format(LogexistingValues(1), "#,###,##0.00") & " | " & _
+                Format(LogexistingValues(2), "#,###,##0.00") & vbCrLf
+        fileContent = entry & fileContent
+    Next tradeLogKey
+
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    On Error Resume Next
+    Open logFilePath For Input As #fileNum
+    If Err.Number = 0 Then
+        Dim existingFileContent As String
+        existingFileContent = Input$(LOF(fileNum), fileNum)
+        fileContent = fileContent & existingFileContent
+    End If
+    Close #fileNum
+    On Error GoTo 0
+    
+    fileNum = FreeFile
+    Open logFilePath For Output As #fileNum
+    Print #fileNum, fileContent
+    Close #fileNum
+
+    ' Email Generation via Outlook
+    Dim OutlookApp As Object
+    Dim clienteMailItem As Object
+    Set OutlookApp = CreateObject("Outlook.Application")
+    
+    Dim dateTimeNow As String
+    Dim MSIPLabel As String
+    dateTimeNow = Format(Date - 8 / 24, "yyyy-MM-ddTHH:mm:ssZ")
+    MSIPLabel = "MSIP_Label_" & SensitivityLabelConfidentialGUID & "_Enabled=true;" & _
+                "MSIP_Label_" & SensitivityLabelConfidentialGUID & "_Method=Privileged;" & _
+                "MSIP_Label_" & SensitivityLabelConfidentialGUID & "_Name=" & SensitivityLabel & ";" & _
+                "MSIP_Label_" & SensitivityLabelConfidentialGUID & "_SetDate=" & dateTimeNow & "; " & _
+                "MSIP_Label_" & SensitivityLabelConfidentialGUID & "_SiteId=" & SiteGUID & "; "
+
+    Dim clientKey As Variant
+    For Each clientKey In eMailMaster.Keys
+        Dim emailbody As String
+        Set eMailCcyDeet = eMailMaster(clientKey)(1)
+        Set eMailFixDeet = eMailMaster(clientKey)(2)
+
+        Dim CcyBlock As String
+        CcyBlock = ""
+        Dim CcyPairForThisClient As Variant
+        For Each CcyPairForThisClient In eMailCcyDeet.Keys
+            CcyBlock = CcyBlock & CStr(eMailCcyDeet(CcyPairForThisClient)) & vbCrLf
+        Next CcyPairForThisClient
+        
+        Dim FixingBlock As String
+        FixingBlock = ""
+        Dim FixingText As Variant
+        For Each FixingText In eMailFixDeet
+            FixingBlock = FixingBlock & CStr(FixingText) & vbCrLf
+        Next FixingText
+             
+        emailbody = clientData(clientKey)(6) & vbCrLf & vbCrLf _
+        & CcyBlock & vbCrLf _
+        & FixingBlock & vbCrLf _
+        & "Please let me know if you note any discrepancy." & vbCrLf _
+        & "best regards,"
+
+        Set clienteMailItem = OutlookApp.CreateItem(0)
+        clienteMailItem.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/string/{00020386-0000-0000-C000-000000000046}/msip_labels", MSIPLabel
+        
+        With clienteMailItem
+            .To = clientData(clientKey)(3)
+            .CC = clientData(clientKey)(4)
+            .Subject = clientData(clientKey)(5)
+            .body = emailbody
+            .Display
+        End With
+    Next clientKey
+    
+    Set tradeTotals = Nothing
+    Shell "C:\windows\system32\notepad.exe " & Chr(34) & logFilePath & Chr(34)
+End Sub
