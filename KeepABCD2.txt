@@ -1,0 +1,60 @@
+#include <Misc.au3>
+
+; 1. Prevent multiple instances of this script from running
+; This replaces your "kills itself" logic with a much cleaner method.
+If _Singleton("KeepABCDAlive", 1) = 0 Then Exit
+
+; 2. TERMINATION HOTKEY
+; Press Alt + Backspace to instantly stop the script.
+HotKeySet("!{BACKSPACE}", "Terminate")
+
+; 3. Configuration
+AutoItSetOption("WinTitleMatchMode", 2) ; Match any part of the window title
+
+$sWinname = "Session Expiring Alert"
+$sMainApp = "FinIQ - Pricer Dealer"
+
+; Small initial pause
+Sleep(500)
+
+While True 
+    ; Wait for the alert window to exist
+    Local $hwd = WinWait($sWinname)
+    
+    ; Check if the workstation is currently at the lock screen
+    If Not ProcessExists("LogonUI.exe") Then 
+        
+        ; --- Handle the Alert Window ---
+        WinActivate($hwd)
+        WinSetOnTop($hwd, "", 1)
+        
+        ; Get coordinates for the click (using your original logic)
+        Local $pos = WinGetPos($hwd)
+        If IsArray($pos) Then
+            ; Double click the alert button
+            MouseClick("left", $pos[0] + 100, $pos[1] + 170, 2)
+        EndIf
+        
+        ; --- Handle the Main Application Window ---
+        Local $hwd2 = WinGetHandle($sMainApp)
+        If $hwd2 Then
+            WinSetState($hwd2, "", @SW_RESTORE) ; Un-minimize if necessary
+            WinActivate($hwd2)
+            WinWaitActive($hwd2, "", 2) ; Wait up to 2 seconds for it to focus
+            
+            ; Clicks on the main app to register activity
+            MouseClick("left", 915, 170, 2) 
+        EndIf
+        
+        ; Release "On Top" status so it doesn't interfere with other work
+        WinSetOnTop($hwd, "", 0)
+    EndIf
+    
+    ; Pause for 1 second before checking again to keep CPU usage at 0%
+    Sleep(1000) 
+WEnd
+
+; The function that runs when you press Alt + Backspace
+Func Terminate()
+    Exit
+EndFunc
