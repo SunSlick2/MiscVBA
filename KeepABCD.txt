@@ -1,0 +1,25 @@
+AutoItSetOption("WinTitleMatchMode", 1)
+;following line kills itself.. find another way
+;if ProcessExists("Keep ABCD Alive.exe") then ProcessClose("Keep ABCD Alive.exe")
+sleep(500)   
+$sWinname = "Session Expiring Alert"
+;ConsoleWrite($sWinname)
+While True 
+   if WinWait($sWinname) then 
+	  if not(ProcessExists("LogonUI.exe")) then 
+		 $hwd = WinGetHandle($sWinname)
+		 $pos = WinGetPos($hwd)
+		 WinActivate($hwd)
+		 WinSetOnTop($hwd,"",1)
+		 MouseClick("left",$pos[0]+100,$pos[1]+170)
+		 MouseClick("left",$pos[0]+100,$pos[1]+170)
+		 $hwd2 = WinGetHandle("FinIQ - Pricer Dealer")
+		 if $hwd2 Then
+			WinSetState($hwd2, "", @SW_RESTORE)
+			Winactivate($hwd2)
+			MouseClick("left",915,170)
+		 	MouseClick("left",915,170)
+		 EndIf
+	  endif
+   EndIf
+WEnd
