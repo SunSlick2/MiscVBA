@@ -1,0 +1,101 @@
+Sub LoadBFIXFromeMail()
+    Application.ScreenUpdating = False
+    Dim olApp As Object
+    Dim olNamespace As Object
+    Dim olMail As Object
+    Dim fso As Object
+    Dim htmlDoc As Object
+    Dim table As Object
+    Dim row As Object, cell As Object
+    Dim ws As Worksheet
+    Dim msgFile As String
+    Dim lastRow As Long
+    Dim i As Integer
+    Dim pairText As String, formattedPair As String
+    Dim rate As String
+    Dim dict As Object
+    Dim fileDialog As fileDialog
+
+    ' Set worksheet
+    Set ws = ThisWorkbook.Sheets("Control")
+    
+    ' Open file dialog to select .msg file
+    Set fileDialog = Application.fileDialog(msoFileDialogFilePicker)
+    With fileDialog
+        .Title = "Select Outlook .msg File"
+        .Filters.Clear
+        .Filters.Add "Outlook Messages", "*.msg"
+        .AllowMultiSelect = False
+        If .Show = -1 Then
+            msgFile = .SelectedItems(1)
+            ws.Range("A3").value = msgFile ' Store selected file path in A3
+        Else
+            MsgBox "No file selected.", vbExclamation
+            Exit Sub
+        End If
+    End With
+    
+    ' Get email file path from A3
+    msgFile = ws.Range("A3").value
+    If msgFile = "" Then
+        MsgBox "No file path found in A3.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Initialize Outlook
+    Set olApp = CreateObject("Outlook.Application")
+    Set olNamespace = olApp.GetNamespace("MAPI")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Open the .msg file
+    Set olMail = olNamespace.OpenSharedItem(msgFile)
+    
+    ' Create HTML document to parse email body
+    Set htmlDoc = CreateObject("HTMLFile")
+    htmlDoc.Write olMail.HTMLBody
+    
+    ' Find the first table in the email
+    Set table = htmlDoc.getElementsByTagName("table")(0)
+    If table Is Nothing Then
+        MsgBox "No table found in email.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Create dictionary to store exchange rates
+    Set dict = CreateObject("Scripting.Dictionary")
+    
+    ' Read table rows
+    For Each row In table.Rows
+        If row.Cells.Length >= 5 Then
+            pairText = Trim(row.Cells(0).innerText) ' Currency pair in "USD - CNH" format
+            rate = Trim(row.Cells(3).innerText) ' 5th column (rate)
+            
+            ' Convert "USD - CNH" to "USDCNH"
+            formattedPair = Replace(pairText, " - ", "")
+            dict(formattedPair) = rate
+        End If
+    Next row
+    
+    ' Update rates in Control sheet
+    lastRow = ws.Cells(ws.Rows.Count, "C").End(xlUp).row
+    ws.Range("D2:D" & lastRow).ClearContents
+        For i = 2 To lastRow
+        If ws.Cells(i, "B").value = "Y" Then
+            formattedPair = ws.Cells(i, "C").value
+            If dict.Exists(formattedPair) Then
+                ws.Cells(i, "D").value = CDbl(dict(formattedPair))
+            End If
+        End If
+    Next i
+
+    ' Cleanup
+    Set olMail = Nothing
+    Set olNamespace = Nothing
+    Set olApp = Nothing
+    Set fso = Nothing
+    Set htmlDoc = Nothing
+    Set table = Nothing
+    Set dict = Nothing
+    Application.ScreenUpdating = True
+    MsgBox "Exchange rates updated successfully.", vbInformation
+End Sub
