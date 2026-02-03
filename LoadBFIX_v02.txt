@@ -1,0 +1,98 @@
+Public Downloadpath As String ' Defined as a public variable in this module
+
+Sub LoadBFIXFromeMail()
+    Application.ScreenUpdating = False
+    Dim olApp As Object, olNamespace As Object, olMail As Object
+    Dim fso As Object, htmlDoc As Object, table As Object
+    Dim row As Object, ws As Worksheet
+    Dim msgFile As String, lastRow As Long, i As Integer
+    Dim pairText As String, formattedPair As String, rate As String
+    Dim dict As Object, fileDialog As fileDialog
+    
+    Set ws = ThisWorkbook.Sheets("Control")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' --- Requirement 2: Open File Dialog in Downloadpath ---
+    Set fileDialog = Application.fileDialog(msoFileDialogFilePicker)
+    With fileDialog
+        .Title = "Select Outlook .msg File"
+        .Filters.Clear
+        .Filters.Add "Outlook Messages", "*.msg"
+        
+        ' Ensure the path ends with a backslash for the dialog
+        If Downloadpath <> "" Then
+            If Right(Downloadpath, 1) <> "\" Then Downloadpath = Downloadpath & "\"
+            .InitialFileName = Downloadpath
+        End If
+        
+        If .Show = -1 Then
+            msgFile = .SelectedItems(1)
+        Else
+            MsgBox "No file selected. Operation cancelled.", vbExclamation
+            Exit Sub
+        End If
+    End With
+
+    ' --- Requirement 1: Alert if the selected file is not updated today ---
+    If Int(fso.GetFile(msgFile).DateLastModified) <> Date Then
+        If MsgBox("The file you selected was not updated today." & vbCrLf & _
+            "Last modified: " & fso.GetFile(msgFile).DateLastModified & vbCrLf & vbCrLf & _
+            "Do you want to continue?", vbYesNo + vbQuestion, "Verify File Date") = vbNo Then
+            Exit Sub
+        End If
+    End If
+
+    ' Store selected file path and process
+    ws.Range("A3").Value = msgFile 
+    
+    ' Initialize Outlook
+    Set olApp = CreateObject("Outlook.Application")
+    Set olNamespace = olApp.GetNamespace("MAPI")
+    Set olMail = olNamespace.OpenSharedItem(msgFile)
+    
+    ' Create HTML document to parse email body
+    Set htmlDoc = CreateObject("HTMLFile")
+    htmlDoc.Write olMail.HTMLBody
+    
+    ' Find the first table
+    On Error Resume Next
+    Set table = htmlDoc.getElementsByTagName("table")(0)
+    On Error GoTo 0
+    
+    If table Is Nothing Then
+        MsgBox "No table found in email.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Create dictionary to store exchange rates
+    Set dict = CreateObject("Scripting.Dictionary")
+    
+    ' Read table rows
+    For Each row In table.Rows
+        If row.Cells.Length >= 5 Then
+            pairText = Trim(row.Cells(0).innerText) 
+            rate = Trim(row.Cells(3).innerText) 
+            formattedPair = Replace(pairText, " - ", "")
+            dict(formattedPair) = rate
+        End If
+    Next row
+    
+    ' Update rates in Control sheet
+    lastRow = ws.Cells(ws.Rows.Count, "C").End(xlUp).Row
+    ws.Range("D2:D" & lastRow).ClearContents
+    
+    For i = 2 To lastRow
+        If ws.Cells(i, "B").Value = "Y" Then
+            formattedPair = ws.Cells(i, "C").Value
+            If dict.Exists(formattedPair) Then
+                ws.Cells(i, "D").Value = CDbl(dict(formattedPair))
+            End If
+        End If
+    Next i
+
+    ' Cleanup
+    Set olMail = Nothing: Set olNamespace = Nothing: Set olApp = Nothing
+    Set fso = Nothing: Set htmlDoc = Nothing: Set table = Nothing: Set dict = Nothing
+    Application.ScreenUpdating = True
+    MsgBox "Exchange rates updated successfully.", vbInformation
+End Sub
