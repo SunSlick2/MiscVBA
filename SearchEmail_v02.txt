@@ -1,0 +1,157 @@
+Option Explicit
+
+Private WithEvents btnQATSearch As Object
+
+' Initialize when Outlook starts
+Private Sub Application_Startup()
+    AddSearchDropdownToQAT
+End Sub
+
+Private Sub AddSearchDropdownToQAT()
+    On Error Resume Next
+    
+    Dim qat As Object
+    Set qat = Application.ActiveExplorer.CommandBars("Standard")
+    
+    ' Remove existing button to avoid duplicates
+    Dim ctrl As Object
+    For Each ctrl In qat.Controls
+        If ctrl.Tag = "QAT_SearchDropdown" Then
+            ctrl.Delete
+            Exit For
+        End If
+    Next ctrl
+    
+    ' Add button at the END of QAT
+    Set btnQATSearch = qat.Controls.Add(1)  ' 1 = msoControlButton
+    With btnQATSearch
+        .Caption = "Quick Search"
+        .Style = 1  ' msoButtonIconAndCaption
+        .Tag = "QAT_SearchDropdown"
+        .TooltipText = "Click for search options"
+        .FaceId = 192  ' Search icon
+    End With
+    
+    On Error GoTo 0
+End Sub
+
+' Handle button click - show dropdown menu
+Private Sub btnQATSearch_Click(ByVal Ctrl As Object, CancelDefault As Boolean)
+    ShowSearchDropdown
+End Sub
+
+Private Sub ShowSearchDropdown()
+    Dim dropdownMenu As Object
+    Dim ctrl As Object
+    
+    ' Create dropdown menu
+    Set dropdownMenu = Application.CommandBars.Add( _
+        Name:="SearchDropdownMenu", _
+        Position:=2,  ' msoBarPopup = 2
+        Temporary:=True)
+    
+    ' Search Option 1
+    Set ctrl = dropdownMenu.Controls.Add(1)  ' msoControlButton = 1
+    ctrl.Caption = "'Run' emails to abc.com (previous business day)"
+    ctrl.OnAction = "SearchRunEmails"
+    
+    ' Search Option 2
+    Set ctrl = dropdownMenu.Controls.Add(1)  ' msoControlButton = 1
+    ctrl.Caption = "Search for 'ABC_'"
+    ctrl.OnAction = "SearchABC"
+    
+    ' Add separator
+    Set ctrl = dropdownMenu.Controls.Add(1)  ' msoControlButton = 1
+    ctrl.Caption = "-"  ' Hyphen creates a separator
+    
+    ' Clear Search button at the END of menu
+    Set ctrl = dropdownMenu.Controls.Add(1)  ' msoControlButton = 1
+    ctrl.Caption = "Clear Search Results"
+    ctrl.OnAction = "ClearSearchResults"
+    
+    ' Show dropdown menu
+    dropdownMenu.ShowPopup
+    
+    ' Clean up
+    On Error Resume Next
+    Application.CommandBars("SearchDropdownMenu").Delete
+    On Error GoTo 0
+End Sub
+
+' (Keep the rest of the search functions the same as above)
+' Search 1: 'Run' emails to abc.com from previous business day
+Public Sub SearchRunEmails()
+    Dim searchFilter As String
+    Dim prevBusinessDay As Date
+    
+    ' Calculate previous business day
+    prevBusinessDay = GetPreviousBusinessDay(Date)
+    
+    ' Build search filter - using Outlook's preferred syntax
+    searchFilter = Chr(34) & "Run" & Chr(34) & _
+        " sentto:abc.com received:" & _
+        Format(prevBusinessDay, "yyyy-mm-dd")
+    
+    ' Execute search immediately
+    ExecuteSearch searchFilter
+End Sub
+
+' Search 2: Search for ABC_
+Public Sub SearchABC()
+    Dim searchFilter As String
+    
+    ' Simple search for ABC_
+    searchFilter = "ABC_"
+    
+    ' Execute search immediately
+    ExecuteSearch searchFilter
+End Sub
+
+Private Function GetPreviousBusinessDay(ByVal currentDate As Date) As Date
+    Dim prevDay As Date
+    
+    prevDay = DateAdd("d", -1, currentDate)
+    
+    ' Adjust for weekends
+    Select Case Weekday(prevDay, vbMonday)
+        Case 6: prevDay = DateAdd("d", -1, prevDay)  ' Saturday -> Friday
+        Case 7: prevDay = DateAdd("d", -2, prevDay)  ' Sunday -> Friday
+    End Select
+    
+    GetPreviousBusinessDay = prevDay
+End Function
+
+Private Sub ExecuteSearch(ByVal searchFilter As String)
+    Dim explorer As Object
+    
+    On Error Resume Next
+    Set explorer = Application.ActiveExplorer
+    
+    If Not explorer Is Nothing Then
+        ' Clear existing search
+        explorer.ClearSearch
+        DoEvents  ' Allow time for clear to complete
+        
+        ' Execute new search
+        explorer.Search searchFilter, 1  ' olSearchScopeAllOutlookItems = 1
+        
+        ' Optional: Show brief status
+        Application.StatusBar = "Searching: " & Left(searchFilter, 40)
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+Public Sub ClearSearchResults()
+    On Error Resume Next
+    
+    Dim explorer As Object
+    Set explorer = Application.ActiveExplorer
+    
+    If Not explorer Is Nothing Then
+        explorer.ClearSearch
+        Application.StatusBar = "Search results cleared"
+    End If
+    
+    On Error GoTo 0
+End Sub
