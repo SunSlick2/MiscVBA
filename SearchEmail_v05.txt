@@ -1,0 +1,169 @@
+' In the UserForm code module (not ThisOutlookSession)
+Option Explicit
+
+' Form controls you need to create:
+' - 2 CommandButtons for searches
+' - 1 CommandButton for Clear
+' - 1 CommandButton for Close
+' - Optional: Labels for instructions
+
+Private Sub UserForm_Initialize()
+    ' Set up form appearance
+    Me.StartUpPosition = 0  ' Manual positioning
+    Me.Left = Application.ActiveExplorer.Left + 20
+    Me.Top = Application.ActiveExplorer.Top + 100
+End Sub
+
+Private Sub cmdSearch1_Click()
+    SearchRunEmails
+End Sub
+
+Private Sub cmdSearch2_Click()
+    SearchABC
+End Sub
+
+Private Sub cmdClear_Click()
+    ClearSearch
+    Me.Hide
+End Sub
+
+Private Sub cmdClose_Click()
+    Me.Hide
+End Sub
+
+Private Sub SearchRunEmails()
+    Dim searchFilter As String
+    Dim prevDay As Date
+    
+    prevDay = Date - 1
+    If Weekday(prevDay) = vbSunday Then prevDay = prevDay - 2
+    If Weekday(prevDay) = vbSaturday Then prevDay = prevDay - 1
+    
+    searchFilter = "subject:""Run"" AND to:""*abc.com"" AND received:""" & _
+        Format(prevDay, "yyyy-mm-dd") & """"
+    
+    ExecuteSearch searchFilter
+    Me.Hide
+End Sub
+
+Private Sub SearchABC()
+    ExecuteSearch "ABC_"
+    Me.Hide
+End Sub
+
+Private Sub ExecuteSearch(ByVal searchFilter As String)
+    Dim explorer As Explorer
+    
+    On Error Resume Next
+    Set explorer = Application.ActiveExplorer
+    
+    If Not explorer Is Nothing Then
+        explorer.ClearSearch
+        DoEvents
+        explorer.Search searchFilter, 1
+        Application.StatusBar = "Search complete"
+        Application.OnTime Now + TimeValue("00:00:02"), "ClearStatus"
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+
+
+Option Explicit
+
+Private Sub Application_Startup()
+    ' Optional: Add button to QAT automatically
+    AddSearchButtonToQAT
+End Sub
+
+Private Sub AddSearchButtonToQAT()
+    On Error Resume Next
+    Dim qat As Office.CommandBar
+    Set qat = Application.ActiveExplorer.CommandBars("Standard")
+    
+    Dim btnExists As Boolean
+    Dim ctrl As Office.CommandBarControl
+    For Each ctrl In qat.Controls
+        If ctrl.Tag = "QAT_SearchForm" Then
+            btnExists = True
+            Exit For
+        End If
+    Next
+    
+    If Not btnExists Then
+        Dim btnSearch As Office.CommandBarButton
+        Set btnSearch = qat.Controls.Add(Type:=1, Before:=qat.Controls.Count + 1)
+        With btnSearch
+            .Caption = "Quick Search"
+            .Style = 1
+            .Tag = "QAT_SearchForm"
+            .TooltipText = "Show search options"
+            .OnAction = "ShowSearchForm"
+        End With
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Sub ShowSearchForm()
+    frmQuickSearch.Show vbModeless  ' vbModeless allows you to keep working
+End Sub
+
+Public Sub ClearSearch()
+    On Error Resume Next
+    Application.ActiveExplorer.ClearSearch
+    Application.StatusBar = "Search cleared"
+    Application.OnTime Now + TimeValue("00:00:02"), "ClearStatus"
+    On Error GoTo 0
+End Sub
+
+Public Sub ClearStatus()
+    Application.StatusBar = False
+End Sub
+
+' In a standard module (not ThisOutlookSession)
+Option Explicit
+
+Public Sub ShowSearchForm()
+    With UserForm1
+        .StartUpPosition = 0
+        .Left = Application.ActiveExplorer.Left + 50
+        .Top = Application.ActiveExplorer.Top + 150
+        .Show vbModeless
+    End With
+End Sub
+
+Public Sub RunSearch1()
+    Dim searchFilter As String
+    Dim prevDay As Date
+    
+    prevDay = Date - 1
+    If Weekday(prevDay) = vbSunday Then prevDay = prevDay - 2
+    If Weekday(prevDay) = vbSaturday Then prevDay = prevDay - 1
+    
+    searchFilter = "subject:""Run"" AND to:""*abc.com"" AND received:""" & _
+        Format(prevDay, "yyyy-mm-dd") & """"
+    
+    ExecuteSearch searchFilter
+End Sub
+
+Public Sub RunSearch2()
+    ExecuteSearch "ABC_"
+End Sub
+
+Private Sub ExecuteSearch(ByVal searchFilter As String)
+    Dim explorer As Explorer
+    
+    On Error Resume Next
+    Set explorer = Application.ActiveExplorer
+    
+    If Not explorer Is Nothing Then
+        explorer.ClearSearch
+        DoEvents
+        explorer.Search searchFilter, 1
+        Application.StatusBar = "Search complete"
+        Application.OnTime Now + TimeValue("00:00:02"), "ClearStatus"
+    End If
+    
+    On Error GoTo 0
+End Sub
