@@ -1,0 +1,182 @@
+Option Explicit
+
+Private WithEvents btnQATSearch As Office.CommandBarButton
+
+' Initialize when Outlook starts
+Private Sub Application_Startup()
+    AddSearchDropdownToQAT
+End Sub
+
+Private Sub AddSearchDropdownToQAT()
+    On Error Resume Next
+    
+    Dim qat As Office.CommandBar
+    Set qat = Application.ActiveExplorer.CommandBars("Standard")
+    
+    ' Remove existing button to avoid duplicates
+    Dim ctrl As Office.CommandBarControl
+    For Each ctrl In qat.Controls
+        If ctrl.Tag = "QAT_SearchDropdown" Then
+            ctrl.Delete
+            Exit For
+        End If
+    Next ctrl
+    
+    ' Add button at the END of QAT
+    Set btnQATSearch = qat.Controls.Add( _
+        Type:=msoControlButton, _
+        Before:=qat.Controls.Count + 1, _
+        Temporary:=False)
+    
+    With btnQATSearch
+        .Caption = "Quick Search"
+        .Style = msoButtonIconAndCaption
+        .Tag = "QAT_SearchDropdown"
+        .TooltipText = "Click for search options"
+        .FaceId = 192  ' Search icon
+    End With
+    
+    On Error GoTo 0
+End Sub
+
+' Handle button click - show dropdown menu
+Private Sub btnQATSearch_Click(ByVal Ctrl As Office.CommandBarButton, _
+                               CancelDefault As Boolean)
+    ShowSearchDropdown
+End Sub
+
+Private Sub ShowSearchDropdown()
+    Dim dropdownMenu As Office.CommandBar
+    
+    ' Create dropdown menu
+    Set dropdownMenu = Application.CommandBars.Add( _
+        Name:="SearchDropdownMenu", _
+        Position:=msoBarPopup, _
+        Temporary:=True)
+    
+    ' Add search options
+    With dropdownMenu
+        ' Search Option 1
+        .Controls.Add(Type:=msoControlButton).Caption = _
+            "'Run' emails to abc.com (previous business day)"
+        .Controls(.Controls.Count).OnAction = "ExecuteSearch1"
+        
+        ' Search Option 2
+        .Controls.Add(Type:=msoControlButton).Caption = _
+            "Search for 'ABC_'"
+        .Controls(.Controls.Count).OnAction = "ExecuteSearch2"
+        
+        ' Separator
+        .Controls.Add Type:=msoControlSeparator
+        
+        ' SEARCH BUTTON at the END of menu
+        .Controls.Add(Type:=msoControlButton).Caption = _
+            "Execute Search"
+        .Controls(.Controls.Count).OnAction = "ExecuteSelectedSearch"
+        .Controls(.Controls.Count).FaceId = 192  ' Search icon
+        .Controls(.Controls.Count).BeginGroup = True
+        
+        ' Clear button (also at end)
+        .Controls.Add(Type:=msoControlButton).Caption = _
+            "Clear Search"
+        .Controls(.Controls.Count).OnAction = "ClearSearchResults"
+    End With
+    
+    ' Show dropdown menu
+    dropdownMenu.ShowPopup
+    
+    ' Clean up
+    Application.CommandBars("SearchDropdownMenu").Delete
+End Sub
+
+' Search 1: 'Run' emails to abc.com from previous business day
+Public Sub ExecuteSearch1()
+    Dim searchFilter As String
+    Dim prevBusinessDay As Date
+    
+    ' Calculate previous business day
+    prevBusinessDay = GetPreviousBusinessDay(Date)
+    
+    ' Build search filter
+    searchFilter = "subject:""Run"" AND to:""*abc.com"" AND received:""" & _
+        Format(prevBusinessDay, "yyyy-mm-dd") & """"
+    
+    ' Execute search
+    RunSearch searchFilter, _
+        "'Run' emails to abc.com from " & Format(prevBusinessDay, "dddd")
+End Sub
+
+' Search 2: Search for ABC_
+Public Sub ExecuteSearch2()
+    RunSearch "ABC_", "Searching for 'ABC_'"
+End Sub
+
+' Execute button at end of menu (re-runs last search or prompts)
+Public Sub ExecuteSelectedSearch()
+    Dim response As VbMsgBoxResult
+    
+    response = MsgBox("Which search would you like to execute?" & vbCrLf & vbCrLf & _
+                      "1. 'Run' emails to abc.com" & vbCrLf & _
+                      "2. Search for 'ABC_'" & vbCrLf & vbCrLf & _
+                      "Click Cancel to go back to menu", _
+                      vbQuestion + vbOKCancel + vbDefaultButton1, _
+                      "Execute Search")
+    
+    If response = vbOK Then
+        ExecuteSearch1
+    Else
+        ' User can click the button again to choose from dropdown
+        Exit Sub
+    End If
+End Sub
+
+Private Function GetPreviousBusinessDay(ByVal currentDate As Date) As Date
+    Dim prevDay As Date
+    
+    prevDay = DateAdd("d", -1, currentDate)
+    
+    ' Adjust for weekends
+    Select Case Weekday(prevDay, vbMonday)
+        Case 6: prevDay = DateAdd("d", -1, prevDay)  ' Saturday -> Friday
+        Case 7: prevDay = DateAdd("d", -2, prevDay)  ' Sunday -> Friday
+    End Select
+    
+    GetPreviousBusinessDay = prevDay
+End Function
+
+Private Sub RunSearch(ByVal searchFilter As String, _
+                     Optional ByVal description As String = "")
+    
+    Dim explorer As Explorer
+    Set explorer = Application.ActiveExplorer
+    
+    On Error Resume Next
+    
+    ' Clear existing search
+    explorer.ClearSearch
+    DoEvents
+    
+    ' Execute new search
+    explorer.Search searchFilter, olSearchScopeAllOutlookItems
+    
+    ' Show brief message
+    If description <> "" Then
+        ' Quick status message
+        SendKeys "%(N)", True  ' Focus on search results
+        Debug.Print "Search: " & description & " | Filter: " & searchFilter
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+Public Sub ClearSearchResults()
+    On Error Resume Next
+    Application.ActiveExplorer.ClearSearch
+    MsgBox "Search results cleared", vbInformation, "Quick Search"
+    On Error GoTo 0
+End Sub
+
+' Clean up on exit (optional - keeps button for next session)
+Private Sub Application_Quit()
+    ' Button persists between sessions - no cleanup needed
+End Sub
