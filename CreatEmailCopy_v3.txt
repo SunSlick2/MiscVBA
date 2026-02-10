@@ -1,0 +1,51 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim originalBody As String
+    Dim modifiedBody As String
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling / Safety Check ---
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation, "No Selection"
+        Exit Sub
+    End If
+    
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email.", vbExclamation, "Invalid Item"
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Create Editable Copy ---
+    ' Copying maintains the high-fidelity HTML/CSS formatting
+    Set newMail = objMail.Copy
+
+    ' Force the copy to be an unsent draft so it is editable
+    newMail.Sent = False
+
+    ' Modify the body text based on format
+    Select Case newMail.BodyFormat
+        Case olFormatHTML
+            originalBody = newMail.HTMLBody
+            newMail.HTMLBody = Replace(originalBody, "CONFIDENTIAL", "")
+        Case olFormatPlain
+            originalBody = newMail.Body
+            newMail.Body = LTrim(Replace(originalBody, "CONFIDENTIAL", ""))
+        Case olFormatRTF
+            originalBody = newMail.RTFBody
+            newMail.RTFBody = Replace(originalBody, "CONFIDENTIAL", "")
+    End Select
+    
+    ' --- Finalize ---
+    ' DeferredDeliveryTime prevents the email from actually sending if you hit 'Send'
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    
+    newMail.Save
+    newMail.Display
+
+End Sub
