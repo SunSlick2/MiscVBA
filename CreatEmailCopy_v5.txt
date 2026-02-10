@@ -1,0 +1,56 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim pa As Outlook.PropertyAccessor
+    Dim originalBody As String
+    Dim modifiedBody As String
+    
+    ' Property tag for PR_MESSAGE_FLAGS
+    Const PR_MESSAGE_FLAGS As String = "http://schemas.microsoft.com/mapi/proptag/0x0E070003"
+    ' Bitmask for MSGFLAG_UNSENT
+    Const MSGFLAG_UNSENT As Long = &H8
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling / Safety Check ---
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Create Copy ---
+    Set newMail = objMail.Copy
+
+    ' --- Unlock the Email (Make it Editable) ---
+    Set pa = newMail.PropertyAccessor
+    ' Set the Unsent flag so the UI allows editing
+    pa.SetProperty PR_MESSAGE_FLAGS, MSGFLAG_UNSENT
+
+    ' --- Modify the body text ---
+    Select Case newMail.BodyFormat
+        Case olFormatHTML
+            originalBody = newMail.HTMLBody
+            newMail.HTMLBody = Replace(originalBody, "CONFIDENTIAL", "")
+        Case olFormatPlain
+            originalBody = newMail.Body
+            newMail.Body = LTrim(Replace(originalBody, "CONFIDENTIAL", ""))
+        Case olFormatRTF
+            originalBody = newMail.RTFBody
+            newMail.RTFBody = Replace(originalBody, "CONFIDENTIAL", "")
+    End Select
+    
+    ' --- Finalize ---
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    newMail.Save
+    newMail.Display
+
+End Sub
