@@ -1,0 +1,60 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim pa As Outlook.PropertyAccessor
+    
+    ' MAPI property for PR_MESSAGE_FLAGS
+    Const PR_MESSAGE_FLAGS As String = "http://schemas.microsoft.com/mapi/proptag/0x0E070003"
+    Const MSGFLAG_UNSENT As Long = &H8
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling ---
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Create High-Fidelity Copy ---
+    ' Using Forward to carry over attachments and embedded images
+    Set newMail = objMail.Forward
+    newMail.Subject = objMail.Subject
+    
+    ' Clear the automatically added recipients
+    Do While newMail.Recipients.Count > 0
+        newMail.Recipients.Remove 1
+    Loop
+
+    ' --- Unlock for Editing ---
+    Set pa = newMail.PropertyAccessor
+    pa.SetProperty PR_MESSAGE_FLAGS, MSGFLAG_UNSENT
+
+    ' --- Replace Forwarded Body with Original Body ---
+    ' This wipes out the "From/Sent/To" header entirely by 
+    ' replacing the new body with the original's content.
+    Select Case newMail.BodyFormat
+        Case olFormatHTML
+            newMail.HTMLBody = Replace(objMail.HTMLBody, "CONFIDENTIAL", "")
+
+        Case olFormatPlain
+            newMail.Body = LTrim(Replace(objMail.Body, "CONFIDENTIAL", ""))
+            
+        Case olFormatRTF
+            newMail.RTFBody = Replace(objMail.RTFBody, "CONFIDENTIAL", "")
+    End Select
+    
+    ' --- Finalize ---
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    newMail.Save
+    newMail.Display
+
+End Sub
