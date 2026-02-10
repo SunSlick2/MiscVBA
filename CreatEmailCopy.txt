@@ -1,0 +1,40 @@
+Sub CopyEmailForEditing()
+
+Dim objOutlook As Outlook.Application
+Dim objMail As Outlook.mailItem
+Dim newMail As Outlook.mailItem
+Dim Sender As Outlook.addressEntry
+Dim Contact As Outlook.ContactItem
+Dim originalBody As String
+Dim modifiedBody As String
+
+Set objOutlook = New Outlook.Application
+Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+objMail.SaveAs "C:\Users\abc\Downloads\Temp.oft"
+Set newMail = objOutlook.CreateItemFromTemplate("C:\Users\abc\Downloads\Temp.oft")
+
+Select Case newMail.BodyFormat
+
+Case olFormatHTML
+    originalBody = objMail.htmlBody
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    newMail.htmlBody = modifiedBody
+
+Case olFormatPlain
+    originalBody = objMail.Body
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    newMail.Body = LTrim(modifiedBody)
+    
+Case olFormatRTF
+    originalBody = objMail.RTFBody
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    newMail.RTFBody = LTrim(modifiedBody)
+
+    
+End Select
+    
+newMail.DeferredDeliveryTime = "1/1/4501"
+newMail.Save
+newMail.Display
+
+End Sub
