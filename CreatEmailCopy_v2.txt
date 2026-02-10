@@ -1,0 +1,55 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim originalBody As String
+    Dim modifiedBody As String
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling / Safety Check ---
+    ' Check if an item is selected
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation, "No Selection"
+        Exit Sub
+    End If
+    
+    ' Ensure the selected item is actually a MailItem (email)
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email. Please select a standard message.", vbExclamation, "Invalid Item Type"
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Improved Formatting Persistence ---
+    ' Using .Copy is faster and preserves HTML/CSS better than saving as .oft
+    Set newMail = objMail.Copy
+
+    ' Modify only the body based on format
+    Select Case newMail.BodyFormat
+
+        Case olFormatHTML
+            originalBody = newMail.HTMLBody
+            newMail.HTMLBody = Replace(originalBody, "CONFIDENTIAL", "")
+
+        Case olFormatPlain
+            originalBody = newMail.Body
+            newMail.Body = LTrim(Replace(originalBody, "CONFIDENTIAL", ""))
+            
+        Case olFormatRTF
+            ' Note: Replacing text in RTF can sometimes be tricky due to control codes,
+            ' but this method maintains the object structure.
+            originalBody = newMail.RTFBody
+            newMail.RTFBody = Replace(originalBody, "CONFIDENTIAL", "")
+            
+    End Select
+    
+    ' --- Finalize ---
+    ' Set delivery to the distant future to prevent accidental sending
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    newMail.Save
+    newMail.Display
+
+End Sub
