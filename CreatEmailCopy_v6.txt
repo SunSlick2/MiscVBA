@@ -1,0 +1,63 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim pa As Outlook.PropertyAccessor
+    Dim originalBody As String
+    
+    ' MAPI property to set the email as an unsent draft
+    Const PR_MESSAGE_FLAGS As String = "http://schemas.microsoft.com/mapi/proptag/0x0E070003"
+    Const MSGFLAG_UNSENT As Long = &H8
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling ---
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Create High-Fidelity Copy ---
+    ' Forwarding is the only native way to guarantee 100% image/attachment retention
+    Set newMail = objMail.Forward
+
+    ' --- Strip Forwarding Artifacts ---
+    ' Reset the subject to match the original exactly
+    newMail.Subject = objMail.Subject
+    ' Remove the recipients (Forwarding adds none by default, but this ensures a clean slate)
+    Do While newMail.Recipients.Count > 0
+        newMail.Recipients.Remove 1
+    Loop
+
+    ' --- Unlock for Editing ---
+    Set pa = newMail.PropertyAccessor
+    pa.SetProperty PR_MESSAGE_FLAGS, MSGFLAG_UNSENT
+
+    ' --- Modify the body text ---
+    Select Case newMail.BodyFormat
+        Case olFormatHTML
+            ' Forwarding adds a header (From/Sent/To). This replaces it and the keyword.
+            originalBody = newMail.HTMLBody
+            newMail.HTMLBody = Replace(originalBody, "CONFIDENTIAL", "")
+        Case olFormatPlain
+            originalBody = newMail.Body
+            newMail.Body = LTrim(Replace(originalBody, "CONFIDENTIAL", ""))
+        Case olFormatRTF
+            originalBody = newMail.RTFBody
+            newMail.RTFBody = Replace(originalBody, "CONFIDENTIAL", "")
+    End Select
+    
+    ' --- Finalize ---
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    newMail.Save
+    newMail.Display
+
+End Sub
