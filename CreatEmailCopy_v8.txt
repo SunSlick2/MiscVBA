@@ -1,0 +1,73 @@
+Sub CopyEmailForEditing()
+
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.MailItem
+    Dim newMail As Outlook.MailItem
+    Dim pa As Outlook.PropertyAccessor
+    Dim cleanHTML As String
+    
+    ' MAPI property for PR_MESSAGE_FLAGS
+    Const PR_MESSAGE_FLAGS As String = "http://schemas.microsoft.com/mapi/proptag/0x0E070003"
+    Const MSGFLAG_UNSENT As Long = &H8
+
+    Set objOutlook = New Outlook.Application
+    
+    ' --- Error Handling ---
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not TypeOf objOutlook.ActiveExplorer.Selection.Item(1) Is Outlook.MailItem Then
+        MsgBox "The selected item is not an email.", vbExclamation
+        Exit Sub
+    End If
+
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' --- Create High-Fidelity Copy ---
+    Set newMail = objMail.Forward
+    newMail.Subject = objMail.Subject
+    
+    ' Clear the automatically added recipients
+    Do While newMail.Recipients.Count > 0
+        newMail.Recipients.Remove 1
+    Loop
+
+    ' --- Unlock for Editing ---
+    Set pa = newMail.PropertyAccessor
+    pa.SetProperty PR_MESSAGE_FLAGS, MSGFLAG_UNSENT
+
+    ' --- Replace Body and Remove Leading Blank Lines ---
+    Select Case newMail.BodyFormat
+        Case olFormatHTML
+            cleanHTML = objMail.HTMLBody
+            
+            ' Remove leading whitespace and common empty HTML tags injected by Outlook
+            Do
+                cleanHTML = LTrim(cleanHTML)
+                If Left(cleanHTML, 4) = "<br>" Then
+                    cleanHTML = Mid(cleanHTML, 5)
+                ElseIf Left(cleanHTML, 7) = "<p>&nbsp" Then
+                    cleanHTML = Mid(cleanHTML, 8)
+                Else
+                    Exit Do
+                End If
+            Loop
+            
+            newMail.HTMLBody = Replace(cleanHTML, "CONFIDENTIAL", "")
+
+        Case olFormatPlain
+            ' LTrim handles leading spaces and newlines in plain text
+            newMail.Body = LTrim(Replace(objMail.Body, "CONFIDENTIAL", ""))
+            
+        Case olFormatRTF
+            newMail.RTFBody = Replace(objMail.RTFBody, "CONFIDENTIAL", "")
+    End Select
+    
+    ' --- Finalize ---
+    newMail.DeferredDeliveryTime = #1/1/4501#
+    newMail.Save
+    newMail.Display
+
+End Sub
