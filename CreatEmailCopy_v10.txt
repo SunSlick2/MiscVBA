@@ -1,0 +1,166 @@
+Sub CopyEmailForEditing()
+    
+    Dim objOutlook As Outlook.Application
+    Dim objMail As Outlook.mailItem
+    Dim newMail As Outlook.mailItem
+    Dim Sender As Outlook.addressEntry
+    Dim Contact As Outlook.ContactItem
+    Dim originalBody As String
+    Dim modifiedBody As String
+    Dim tempPath As String
+    Dim fso As Object
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set temporary file path
+    tempPath = "C:\Users\abc\Downloads\Temp.oft"
+    
+    ' Initialize Outlook
+    Set objOutlook = New Outlook.Application
+    
+    ' Check if an email is selected
+    If objOutlook.ActiveExplorer.Selection.Count = 0 Then
+        MsgBox "Please select an email first.", vbExclamation, "No Email Selected"
+        Exit Sub
+    End If
+    
+    Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+    
+    ' Save original email as template
+    On Error Resume Next
+    objMail.SaveAs tempPath
+    If Err.Number <> 0 Then
+        MsgBox "Error saving template file. Please check permissions for: " & tempPath, vbCritical, "File Error"
+        Exit Sub
+    End If
+    On Error GoTo ErrorHandler
+    
+    ' Create new email from template
+    Set newMail = objOutlook.CreateItemFromTemplate(tempPath)
+    
+    ' Clean up template file immediately
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(tempPath) Then
+        fso.DeleteFile tempPath
+    End If
+    Set fso = Nothing
+    
+    ' Process based on email format
+    Select Case newMail.BodyFormat
+        
+        Case olFormatHTML
+            originalBody = objMail.htmlBody
+            modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+            
+            ' Remove leading blank space/empty elements common in HTML emails
+            ' This addresses the blank space at the top issue
+            modifiedBody = CleanHTMLBody(modifiedBody)
+            
+            newMail.htmlBody = modifiedBody
+        
+        Case olFormatPlain
+            originalBody = objMail.Body
+            modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+            
+            ' Remove leading blank lines (addressing the blank space issue)
+            modifiedBody = RemoveLeadingBlankLines(modifiedBody)
+            
+            newMail.Body = modifiedBody
+            
+        Case olFormatRTF
+            originalBody = objMail.RTFBody
+            modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+            
+            ' Remove leading blank lines (addressing the blank space issue)
+            modifiedBody = RemoveLeadingBlankLines(modifiedBody)
+            
+            newMail.RTFBody = modifiedBody
+            
+        Case Else
+            MsgBox "Unsupported email format.", vbExclamation, "Format Error"
+            Exit Sub
+            
+    End Select
+    
+    ' Set deferred delivery to prevent accidental sending
+    newMail.DeferredDeliveryTime = "1/1/4501"
+    newMail.Save
+    newMail.Display
+    
+    Exit Sub
+    
+ErrorHandler:
+    ' Clean up template file if it exists
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(tempPath) Then
+        fso.DeleteFile tempPath
+    End If
+    Set fso = Nothing
+    
+    ' Show error message
+    MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical, "Macro Error"
+    
+End Sub
+
+' Function to clean HTML body and remove leading blank space
+Function CleanHTMLBody(htmlContent As String) As String
+    Dim cleanedContent As String
+    
+    cleanedContent = htmlContent
+    
+    ' Common patterns that cause blank space at top of HTML emails
+    ' Remove empty paragraphs at the beginning
+    cleanedContent = Replace(cleanedContent, "<p>&nbsp;</p>", "", 1, 1, vbTextCompare)
+    cleanedContent = Replace(cleanedContent, "<p></p>", "", 1, 1, vbTextCompare)
+    cleanedContent = Replace(cleanedContent, "<p><br></p>", "", 1, 1, vbTextCompare)
+    cleanedContent = Replace(cleanedContent, "<div><br></div>", "", 1, 1, vbTextCompare)
+    cleanedContent = Replace(cleanedContent, "<div>&nbsp;</div>", "", 1, 1, vbTextCompare)
+    
+    ' Remove multiple leading <br> tags
+    Do While Left(cleanedContent, 4) = "<br>"
+        cleanedContent = Mid(cleanedContent, 5)
+    Loop
+    
+    ' Remove leading newlines/carriage returns
+    Do While Left(cleanedContent, 2) = vbCrLf
+        cleanedContent = Mid(cleanedContent, 3)
+    Loop
+    
+    Do While Left(cleanedContent, 1) = vbCr Or Left(cleanedContent, 1) = vbLf
+        cleanedContent = Mid(cleanedContent, 2)
+    Loop
+    
+    CleanHTMLBody = cleanedContent
+End Function
+
+' Function to remove leading blank lines from plain text
+Function RemoveLeadingBlankLines(textContent As String) As String
+    Dim lines As Variant
+    Dim i As Integer
+    Dim result As String
+    Dim foundContent As Boolean
+    
+    lines = Split(textContent, vbCrLf)
+    result = ""
+    foundContent = False
+    
+    For i = LBound(lines) To UBound(lines)
+        If Not foundContent Then
+            ' Check if line has actual content (not just whitespace)
+            If Trim(lines(i)) <> "" Then
+                foundContent = True
+                result = lines(i)
+            End If
+        Else
+            ' Add the rest of the lines
+            If result = "" Then
+                result = lines(i)
+            Else
+                result = result & vbCrLf & lines(i)
+            End If
+        End If
+    Next i
+    
+    RemoveLeadingBlankLines = result
+End Function
