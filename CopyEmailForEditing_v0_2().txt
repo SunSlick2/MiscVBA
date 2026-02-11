@@ -1,0 +1,52 @@
+Sub CopyEmailForEditing_v0_2()
+
+Dim objOutlook As Outlook.Application
+Dim objMail As Outlook.mailItem
+Dim newMail As Outlook.mailItem
+Dim Sender As Outlook.addressEntry
+Dim Contact As Outlook.ContactItem
+Dim originalBody As String
+Dim modifiedBody As String
+
+Set objOutlook = New Outlook.Application
+
+' Added safety check to prevent crash if nothing is selected
+If objOutlook.ActiveExplorer.Selection.Count = 0 Then Exit Sub
+
+Set objMail = objOutlook.ActiveExplorer.Selection.Item(1)
+objMail.SaveAs "C:\Users\abc\Downloads\Temp.oft"
+Set newMail = objOutlook.CreateItemFromTemplate("C:\Users\abc\Downloads\Temp.oft")
+
+Select Case newMail.BodyFormat
+
+Case olFormatHTML
+    originalBody = objMail.htmlBody
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    
+    ' Mimic pressing Delete twice by removing up to two leading <br> tags
+    If Left(LTrim(modifiedBody), 4) = "<br>" Then modifiedBody = Mid(LTrim(modifiedBody), 5)
+    If Left(LTrim(modifiedBody), 4) = "<br>" Then modifiedBody = Mid(LTrim(modifiedBody), 5)
+    
+    newMail.htmlBody = modifiedBody
+
+Case olFormatPlain
+    originalBody = objMail.Body
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    
+    ' Mimic pressing Delete twice by skipping the first two characters
+    If Len(modifiedBody) > 2 Then modifiedBody = Mid(LTrim(modifiedBody), 3)
+    
+    newMail.Body = modifiedBody
+    
+Case olFormatRTF
+    originalBody = objMail.RTFBody
+    modifiedBody = Replace(originalBody, "CONFIDENTIAL", "")
+    newMail.RTFBody = LTrim(modifiedBody)
+    
+End Select
+    
+newMail.DeferredDeliveryTime = "1/1/4501"
+newMail.Save
+newMail.Display
+
+End Sub
