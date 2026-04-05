@@ -1,0 +1,153 @@
+There are two spreadsheets
+1. Client Positions.xlsm with sheet Position. Headers for the data are in row 6
+	2. Daily Processes.xlsm with sheet Expiry . Headers for data in in row 1
+	3. Headers in CP and DP are same but the order may be a little different. 
+	4. Daily Processes is to serve as master source. Client Positions is to serve as the data that needs to be updated
+	5. From DP, select all rows where FXDC Ref is 5 digit long, Live/Cash is Live.
+	6. If no data is shortlisted, display message no data in DP and terminate the process
+	7. For any DP row selected, take any Expiry and determine day of week ( like Monday, Tuesday etc).
+	8. From CP, select all trades with same FXDC Ref as DP. If a FXDC Ref in DP is not in CP, then copy the entire record from DP and copy to CP. For all such trades copied, from row 7 of CP, copy all cells with formulae only and copy the respective formula to the  corresponding cell of the row copied from DP to CP. Make sure that cells with formulae only from row 7 are copied and not the other cells. For such trades, keep a collection of FXDC Ref. Call it CheckExpiryForFXDCRef
+	9. Compare values under respective headers in CP and DP for each FXDC Ref matched. 
+	10. The headers to be compared are 
+		a. Client,CCYpair,Struct,Ccy,Notional, Live/Cash as strings
+		b. Lower eKI,Lower Strike,KO/Pivot,Upper Strike,Upper eKI as double ( use method of difference for comparison)
+		A. If any of these values are difference, then update the value in CP
+		B. Further, for each FXDC Ref being compared, if DOW in CP and DOW in DP differ, then highlight the Expiry date of that FXDC Ref in CP with background as RGB(255, 127, 80). For such trades, keep a collection of FXDC Ref. Call it CheckDOWForFXDC ref. 
+		
+	11. After all FXDC ref from DP are processed, run macro FixDDD in CP, where DDD stands for day of week like Mon, Tue… Fri. The DDD needs to be the same as DOW in DP. This needs to be run only once. Then run macro AQDQs. Then run marco SortCustomers. This will select some trades in CP. Copy the FXDC ref of these trades to Sheet Audit AQDQ, B11 onwards, sorted small to big  (downwards)
+	12. In AuditAQDQ, copy all FXDC ref from DP and populated them A11 onwards, sorted small to big  (downwards)
+	13. In AuditAQDQ, populated CheckExpiryForFXDCRef E11 onwards, sorted small to big  (downwards)
+	14. In AuditAQDQ, populated CheckDOWForFXDC F11 onwards, sorted small to big  (downwards)
+	15. In AuditAQDQ, check for unique values in FXDC refs populated in A and B columns and highlight unique values with background as RGB(255, 127, 80). Use conditional formatting.
+	
+Some clarifications to assist
+
+1. **File locations / opening:**
+   - Will both workbooks (`Client Positions.xlsm` and `Daily Processes.xlsm`) already be open when the macro runs, or should the code open `Daily Processes.xlsm` from a known folder path?  -- should be open, but check
+   - If it should open them: what are the exact file paths (or should I assume they are in the same folder as `Client Positions.xlsm`)?
+   -- CP path is C:\Users\abc\OneDrive\Documents\Client Related
+   -- DP path is C:\Users\abc\OneDrive\Documents\Tools
+  
+2. **Exact header names:**
+   Please confirm the exact header text for each of these fields (as written in the header row of each sheet):
+   - FXDC Ref  
+   - Client  
+   - CCYpair  
+   - Struct  
+   - Ccy  
+   - Notional  
+   - Live/Cash  
+   - Lower eKI  
+   - Lower Strike  
+   - KO/Pivot  
+   - Upper Strike  
+   - Upper eKI  
+   - Expiry (column used to determine day-of-week)  
+-- all headers are correct   
+ - DOW column in CP, if it already exists (name?)  
+-- DOW is to be determined from column header Expiry in CP as well. 
+
+3. **“XXXXXXXX of that FXDC Ref” in CP (Step 10.B):**
+   - What exactly should be highlighted when DOW differs?
+     - The entire row for that FXDC Ref?  
+     - The FXDC Ref cell only?  
+     - Or a specific column (please specify header name)?
+-- Expiry only 
+
+4. **Expiry and DOW:**
+   - In DP, the “Expiry” column is a Date type, correct?  
+-- Correct 
+   - In CP, is there already:
+     - an “Expiry” column?  
+-- Correct      
+    - a separate “DOW” column (e.g. text like Mon, Tue, …)? If yes, what is its header?
+-- no, determine DOW from Expiry.
+-- For avoidance of doubt, all trades in DP have same DOW. That is not the case on CP
+
+5. **FXDC Ref type and length check (Step 5):**
+   - Is “FXDC Ref” always numeric (e.g. 12345) or can it be text containing leading zeros (e.g. "01234")?  
+-- It is numeric with non leading zeros
+
+   - For “5 digit long,” do you mean:
+     - exactly 5 characters (Len = 5), regardless of whether it’s numeric or text, or  
+     - a numeric value between 10000 and 99999?
+-- it is numeric value between 10000 and 99999
+
+6. **Copying formulas from row 7 only (Step 8):**
+   - When we copy formulas from row 7 to a newly added row:
+     - Should we copy *all* formula cells from row 7 across the used columns, except the ones that are non-formula?  
+     - Or is there a specific range (e.g. columns H to Z) that should receive formulas?
+-- all formula.. currently data is in columns A-AN, but this may change, so keep it dynamic
+
+   - If a column in row 7 has a formula, we should copy that formula; if it has a value/constant, we leave the new row as-is in that column. Correct?
+-- correct 
+
+7. **Collections:**
+   - `CheckExpiryForFXDCRef`: this should include all FXDC Refs that were **inserted** into CP because they did not exist previously, correct? (Not the ones that already existed and were just updated.)
+--  correct
+   - `CheckDOWForFXDCRef`: this should include all FXDC Refs where DOW is different between CP and DP (before running FixDDD), correct?
+-- correct. For the same FXDCRef in CP and DP, if the DOW differs, then the Expiry needs to be investigated
+
+8. **Running macro FixDDD (Step 11):**
+   - You wrote: “run macro FixDDD in CP, where DDD stands for day of week like Mon, Tue… Fri. The DDD needs to be the same as DOW in DP.”
+     - Does this mean we should determine the DOW text from DP (e.g., “Mon”) and then build the macro name `FixMon`, `FixTue`, etc., and run that single macro once?  
+-- Macros already exist, you need to generate correct name only 
+     - Or do you already have multiple macros (`FixMon`, `FixTue`, etc.) and want one specific one chosen based on DP’s DOW – and what if DP has multiple different DOWs?
+-- Macros already exist, you need to generate correct name only
+
+9. **AQDQs and SortCustomers (Step 11):**
+   - Do `AQDQs` and `SortCustomers` macros already exist in CP and will be called as-is (no parameters)?  
+-- Macros already exist
+   - After `SortCustomers` runs:
+     - How do we know which trades it “selects”? Do these trades end up as selected rows on the `Position` sheet, or are they filtered? Please describe how to identify those trades and their FXDC Refs.
+-- Macro selects the trades that need to be audited. There will be a filtered list on Position after the macros are run. Use all the trades in the filtered list.
+
+10. **AuditAQDQ sheet structure:**
+    - In which workbook is `Audit AQDQ` / `AuditAQDQ` sheet located? In `Client Positions.xlsm`?  
+-- Yes, Client Positions.xlsm
+    - Confirm the sheet name spelling: is it `"Audit AQDQ"` (with a space) or `"AuditAQDQ"` (no space)?  
+-- AuditAQDQ (no space)
+    - Existing data:
+      - Can we clear existing data from A11:F (downwards) each time before writing new values?  
+-- yes, clear all 
+   
+ - Column mapping:
+      - Column A: FXDC Ref from DP  
+      - Column B: FXDC Ref from selected trades in CP after `SortCustomers`  
+      - Column E: `CheckExpiryForFXDCRef`  
+      - Column F: `CheckDOWForFXDCRef`  
+      Confirm this is correct and whether C and D are intentionally unused.
+-- all correct
+
+11. **Sorting:**
+    - When sorting FXDC Refs “small to big,” should we treat them as numbers or text? (Depends partly on your answer to Q5.)
+-- numbers
+
+12. **Step 15 – Conditional formatting of unique values:**
+    - “Check for unique values in FXDC refs populated in A and B columns and highlight unique values…”
+      - Do you mean:
+        - Highlight values that appear in A but not in B, and values that appear in B but not in A?  
+        - Or highlight any value that occurs only once across both lists combined (e.g., appears only once in A or B, not multiple times)?
+-- highlight any value that occurs only once across both lists combined 
+
+13. **Workbook names vs paths**  
+   You gave the paths but not the exact filenames there. Can I assume:
+   - `Client Positions.xlsm` is in  
+     `C:\Users\abc\OneDrive\Documents\Client Related\Client Positions.xlsm`
+   - `Daily Processes.xlsm` is in  
+     `C:\Users\abc\OneDrive\Documents\Tools\Daily Processes.xlsm`  
+-- both are correct 
+   If the filenames in those folders are slightly different (e.g. with dates or prefixes), please give the **exact** filenames.
+
+14. **DP filter range**  
+   On the `Expiry` sheet in DP:
+   - Are there any other header rows (titles, blank rows) above row 1, or is **row 1** the only header row and data starts from row 2 downwards with no gaps?  
+-- headers are all in row 1, data starts from row 2
+-- there are other header columns.. I've only given the headers that are needed for the comparisons. 
+   - Can we assume the FXDC Ref and Live/Cash columns are always populated for any “valid” trade row (i.e. no blank FXDC Ref rows in the middle of the data region)?
+-- yes
+	
+- ask any questions you may have first. The objective is to write VBA code to accomplish tasks above.		
+		
+		
+	
