@@ -1,0 +1,457 @@
+Perfect — here’s the **full VBA code** in one module, split into clear subs/functions. You can paste this into a standard module in `Client Positions.xlsm` and run `MainProcess` to execute the workflow.
+
+```vba
+Option Explicit
+
+' === Entry Point ===
+Sub MainProcess()
+    Dim wbCP As Workbook, wbDP As Workbook
+    Dim wsCP As Worksheet, wsDP As Worksheet, wsAudit As Worksheet
+    Dim dpRows As Collection, checkExpiry As Collection, checkDOW As Collection
+    Dim dpDOW As String
+    
+    ' Ensure both workbooks are open
+    Set wbCP = EnsureWorkbookOpen("Client Positions.xlsm", "C:\Users\abc\OneDrive\Documents\Client Related\Client Positions.xlsm")
+    Set wbDP = EnsureWorkbookOpen("Daily Processes.xlsm", "C:\Users\abc\OneDrive\Documents\Tools\Daily Processes.xlsm")
+    
+    Set wsCP = wbCP.Sheets("Position")
+    Set wsDP = wbDP.Sheets("Expiry")
+    Set wsAudit = wbCP.Sheets("AuditAQDQ")
+    
+    ' Filter DP rows
+    Set dpRows = FilterDP(wsDP)
+    If dpRows.Count = 0 Then
+        MsgBox "No data in DP", vbInformation
+        Exit Sub
+    End If
+    
+    ' Collections for tracking
+    Set checkExpiry = New Collection
+    Set checkDOW = New Collection
+    
+    ' Process DP rows
+    ProcessDPRows dpRows, wsCP, wsDP, checkExpiry, checkDOW, dpDOW
+    
+    ' Run macros
+    RunMacros dpDOW, wbCP
+    
+    ' Populate Audit sheet
+    PopulateAudit dpRows, wsCP, checkExpiry, checkDOW, wsAudit
+    
+    ' Apply conditional formatting
+    ApplyConditionalFormatting wsAudit
+    
+    MsgBox "Process completed successfully.", vbInformation
+End Sub
+
+' === Workbook Utilities ===
+Function EnsureWorkbookOpen(wbName As String, wbPath As String) As Workbook
+    Dim wb As Workbook
+    On Error Resume Next
+    Set wb = Workbooks(wbName)
+    On Error GoTo 0
+    If wb Is Nothing Then
+        Set wb = Workbooks.Open(wbPath)
+    End If
+    Set EnsureWorkbookOpen = wb
+End Function
+
+' === Filter DP Rows ===
+Function FilterDP(wsDP As Worksheet) As Collection
+    Dim lastRow As Long, i As Long
+    Dim fxdcRef As Variant, liveCash As String
+    Dim result As New Collection
+    
+    lastRow = wsDP.Cells(wsDP.Rows.Count, "A").End(xlUp).Row
+    
+    For i = 2 To lastRow
+        fxdcRef = wsDP.Cells(i, wsDP.Rows(1).Find("FXDC Ref").Column).Value
+        liveCash = wsDP.Cells(i, wsDP.Rows(1).Find("Live/Cash").Column).Value
+        
+        If IsNumeric(fxdcRef) Then
+            If fxdcRef >= 10000 And fxdcRef <= 99999 And UCase(liveCash) = "LIVE" Then
+                result.Add wsDP.Rows(i)
+            End If
+        End If
+    Next i
+    
+    Set FilterDP = result
+End Function
+
+' === Process DP Rows ===
+Sub ProcessDPRows(dpRows As Collection, wsCP As Worksheet, wsDP As Worksheet, checkExpiry As Collection, checkDOW As Collection, dpDOW As String)
+    Dim i As Long, dpRow As Range, cpRow As Range
+    Dim fxdcRef As Long, expiryDate As Date, dowText As String
+    
+    For i = 1 To dpRows.Count
+        Set dpRow = dpRows(i)
+        fxdcRef = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("FXDC Ref").Column).Value
+        expiryDate = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("Expiry").Column).Value
+        dowText = Format(expiryDate, "ddd")
+        
+        ' Save DP DOW (all rows same DOW)
+        If dpDOW = "" Then dpDOW = dowText
+        
+        ' Find CP row
+        Set cpRow = FindCPRow(wsCP, fxdcRef)
+        
+        If cpRow Is Nothing Then
+            ' Insert new row
+            InsertCPRow wsCP, dpRow, checkExpiry
+        Else
+            ' Compare and update
+            CompareAndUpdate dpRow, cpRow, checkDOW, dowText
+        End If
+    Next i
+End Sub
+
+Function FindCPRow(wsCP As Worksheet, fxdcRef As Long) As Range
+    Dim lastRow As Long, i As Long
+    Dim colRef As Long
+    colRef = wsCP.Rows(6).Find("FXDC Ref").Column
+    lastRow = wsCP.Cells(wsCP.Rows.Count, colRef).End(xlUp).Row
+    
+    For i = 7 To lastRow
+        If wsCP.Cells(i, colRef).Value = fxdcRef Then
+            Set FindCPRow = wsCP.Rows(i)
+            Exit Function
+        End If
+    Next i
+End Function
+
+Sub InsertCPRow(wsCP As Worksheet, dpRow As Range, checkExpiry As Collection)
+    Dim newRow As Long, col As Long, lastCol As Long
+    Dim fxdcRef As Long
+    
+    newRow = wsCP.Cells(wsCP.Rows.Count, "A").End(xlUp).Row + 1
+    lastCol = wsCP.Cells(6, wsCP.Columns.Count).End(xlToLeft).Column
+    
+    ' Copy DP values
+    For col = 1 To lastCol
+        wsCP.Cells(newRow, col).Value = dpRow.Cells(1, col).Value
+    Next col
+    
+    ' Copy formulas from row 7
+    For col = 1 To lastCol
+        If wsCP.Cells(7, col).HasFormula Then
+            wsCP.Cells(newRow, col).Formula = wsCP.Cells(7, col).Formula
+        End If
+    Next col
+    
+    fxdcRef = wsCP.Cells(newRow, wsCP.Rows(6).Find("FXDC Ref").Column).Value
+    checkExpiry.Add fxdcRef
+End Sub
+
+Sub CompareAndUpdate(dpRow As Range, cpRow As Range, checkDOW As Collection, dpDOW As String)
+    Dim headers As Variant, i As Long
+    Dim colDP As Long, colCP As Long
+    Dim valDP As Variant, valCP As Variant
+    Dim expiryDP As Date, expiryCP As Date
+    
+    headers = Array("Client", "CCYpair", "Struct", "Ccy", "Notional", "Live/Cash", _
+                    "Lower eKI", "Lower Strike", "KO/Pivot", "Upper Strike", "Upper eKI")
+    
+    For i = LBound(headers) To UBound(headers)
+        colDP = dpRow.Parent.Rows(1).Find(headers(i)).Column
+        colCP = cpRow.Parent.Rows(6).Find(headers(i)).Column
+        valDP = dpRow.Cells(1, colDP).Value
+        valCP = cpRow.Cells(1, colCP).Value
+        
+        If IsNumeric(valDP) And IsNumeric(valCP) Then
+            If Abs(valDP - valCP) > 0.0001 Then cpRow.Cells(1, colCP).Value = valDP
+        Else
+            If valDP <> valCP Then cpRow.Cells(1, colCP).Value = valDP
+        End If
+    Next i
+    
+    ' Compare DOW
+    expiryDP = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("Expiry").Column).Value
+    expiryCP = cpRow.Cells(1, cpRow.Parent.Rows(6).Find("Expiry").Column).Value
+    
+    If Format(expiryDP, "ddd") <> Format(expiryCP, "ddd") Then
+        cpRow.Cells(1, cpRow.Parent.Rows(6).Find("Expiry").Column).Interior.Color = RGB(255, 127, 80)
+        checkDOW.Add cpRow.Cells(1, cpRow.Parent.Rows(6).Find("FXDC Ref").Column).Value
+    End If
+End Sub
+
+' === Run Macros ===
+Sub RunMacros(dowText As String, wbCP As Workbook)
+    Application.Run wbCP.Name & "!Fix" & dowText
+    Application.Run wbCP.Name & "!AQDQs"
+    Application.Run wbCP.Name & "!SortCustomers"
+End Sub
+
+' === Populate Audit ===
+Sub PopulateAudit(dpRows As Collection, wsCP As Worksheet, checkExpiry As Collection, checkDOW As Collection, wsAudit As Worksheet)
+    Dim i As Long, fxdcRef As Long
+    Dim colRef As Long, lastRow As Long
+    
+    ' Clear old data
+    wsAudit.Range("A11:F" & wsAudit.Rows.Count).ClearContents
+    
+    ' DP FXDC Refs → Column A
+    For i = 1 To dpRows.Count
+        fxdcRef = dpRows(i).Cells(1, dpRows(i).Parent.Rows(1).Find("FXDC Ref").Column).Value
+        wsAudit.Cells(10 + i, 1).Value = fxdcRef
+    Next i
+    
+    ' CP selected trades after SortCustomers → Column B
+    colRef = wsCP.Rows(6).Find("FXDC Ref").Column
+    lastRow = wsCP.Cells(wsCP.Rows.Count, colRef).End(xlUp).Row
+    Dim rowIndex As Long: rowIndex = 11
+    For i = 7 To lastRowHere’s the complete VBA implementation, all in **one module** but split into clear subs/functions. You can paste this into a standard module in `Client Positions.xlsm` and run `MainProcess` to execute the workflow.
+
+```vba
+Option Explicit
+
+' === Entry Point ===
+Sub MainProcess()
+    Dim wbCP As Workbook, wbDP As Workbook
+    Dim wsCP As Worksheet, wsDP As Worksheet, wsAudit As Worksheet
+    Dim dpRows As Collection, checkExpiry As Collection, checkDOW As Collection
+    Dim dpDOW As String
+    
+    ' Ensure both workbooks are open
+    Set wbCP = EnsureWorkbookOpen("Client Positions.xlsm", "C:\Users\abc\OneDrive\Documents\Client Related\Client Positions.xlsm")
+    Set wbDP = EnsureWorkbookOpen("Daily Processes.xlsm", "C:\Users\abc\OneDrive\Documents\Tools\Daily Processes.xlsm")
+    
+    Set wsCP = wbCP.Sheets("Position")
+    Set wsDP = wbDP.Sheets("Expiry")
+    Set wsAudit = wbCP.Sheets("AuditAQDQ")
+    
+    ' Filter DP rows
+    Set dpRows = FilterDP(wsDP)
+    If dpRows.Count = 0 Then
+        MsgBox "No data in DP", vbInformation
+        Exit Sub
+    End If
+    
+    ' Collections for tracking
+    Set checkExpiry = New Collection
+    Set checkDOW = New Collection
+    
+    ' Process DP rows
+    ProcessDPRows dpRows, wsCP, wsDP, checkExpiry, checkDOW, dpDOW
+    
+    ' Run macros
+    RunMacros dpDOW, wbCP
+    
+    ' Populate Audit sheet
+    PopulateAudit dpRows, wsCP, checkExpiry, checkDOW, wsAudit
+    
+    ' Apply conditional formatting
+    ApplyConditionalFormatting wsAudit
+    
+    MsgBox "Process completed successfully.", vbInformation
+End Sub
+
+' === Workbook Utilities ===
+Function EnsureWorkbookOpen(wbName As String, wbPath As String) As Workbook
+    Dim wb As Workbook
+    On Error Resume Next
+    Set wb = Workbooks(wbName)
+    On Error GoTo 0
+    If wb Is Nothing Then
+        Set wb = Workbooks.Open(wbPath)
+    End If
+    Set EnsureWorkbookOpen = wb
+End Function
+
+' === Filter DP Rows ===
+Function FilterDP(wsDP As Worksheet) As Collection
+    Dim lastRow As Long, i As Long
+    Dim fxdcRef As Variant, liveCash As String
+    Dim result As New Collection
+    Dim colRef As Long, colLive As Long
+    
+    colRef = wsDP.Rows(1).Find("FXDC Ref").Column
+    colLive = wsDP.Rows(1).Find("Live/Cash").Column
+    lastRow = wsDP.Cells(wsDP.Rows.Count, colRef).End(xlUp).Row
+    
+    For i = 2 To lastRow
+        fxdcRef = wsDP.Cells(i, colRef).Value
+        liveCash = wsDP.Cells(i, colLive).Value
+        
+        If IsNumeric(fxdcRef) Then
+            If fxdcRef >= 10000 And fxdcRef <= 99999 And UCase(liveCash) = "LIVE" Then
+                result.Add wsDP.Rows(i)
+            End If
+        End If
+    Next i
+    
+    Set FilterDP = result
+End Function
+
+' === Process DP Rows ===
+Sub ProcessDPRows(dpRows As Collection, wsCP As Worksheet, wsDP As Worksheet, checkExpiry As Collection, checkDOW As Collection, dpDOW As String)
+    Dim i As Long, dpRow As Range, cpRow As Range
+    Dim fxdcRef As Long, expiryDate As Date, dowText As String
+    
+    For i = 1 To dpRows.Count
+        Set dpRow = dpRows(i)
+        fxdcRef = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("FXDC Ref").Column).Value
+        expiryDate = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("Expiry").Column).Value
+        dowText = Format(expiryDate, "ddd")
+        
+        ' Save DP DOW (all rows same DOW)
+        If dpDOW = "" Then dpDOW = dowText
+        
+        ' Find CP row
+        Set cpRow = FindCPRow(wsCP, fxdcRef)
+        
+        If cpRow Is Nothing Then
+            ' Insert new row
+            InsertCPRow wsCP, dpRow, checkExpiry
+        Else
+            ' Compare and update
+            CompareAndUpdate dpRow, cpRow, checkDOW, dowText
+        End If
+    Next i
+End Sub
+
+Function FindCPRow(wsCP As Worksheet, fxdcRef As Long) As Range
+    Dim lastRow As Long, i As Long
+    Dim colRef As Long
+    colRef = wsCP.Rows(6).Find("FXDC Ref").Column
+    lastRow = wsCP.Cells(wsCP.Rows.Count, colRef).End(xlUp).Row
+    
+    For i = 7 To lastRow
+        If wsCP.Cells(i, colRef).Value = fxdcRef Then
+            Set FindCPRow = wsCP.Rows(i)
+            Exit Function
+        End If
+    Next i
+End Function
+
+Sub InsertCPRow(wsCP As Worksheet, dpRow As Range, checkExpiry As Collection)
+    Dim newRow As Long, col As Long, lastCol As Long
+    Dim fxdcRef As Long
+    
+    newRow = wsCP.Cells(wsCP.Rows.Count, "A").End(xlUp).Row + 1
+    lastCol = wsCP.Cells(6, wsCP.Columns.Count).End(xlToLeft).Column
+    
+    ' Copy DP values
+    For col = 1 To lastCol
+        wsCP.Cells(newRow, col).Value = dpRow.Cells(1, col).Value
+    Next col
+    
+    ' Copy formulas from row 7
+    For col = 1 To lastCol
+        If wsCP.Cells(7, col).HasFormula Then
+            wsCP.Cells(newRow, col).Formula = wsCP.Cells(7, col).Formula
+        End If
+    Next col
+    
+    fxdcRef = wsCP.Cells(newRow, wsCP.Rows(6).Find("FXDC Ref").Column).Value
+    checkExpiry.Add fxdcRef
+End Sub
+
+Sub CompareAndUpdate(dpRow As Range, cpRow As Range, checkDOW As Collection, dpDOW As String)
+    Dim headers As Variant, i As Long
+    Dim colDP As Long, colCP As Long
+    Dim valDP As Variant, valCP As Variant
+    Dim expiryDP As Date, expiryCP As Date
+    
+    headers = Array("Client", "CCYpair", "Struct", "Ccy", "Notional", "Live/Cash", _
+                    "Lower eKI", "Lower Strike", "KO/Pivot", "Upper Strike", "Upper eKI")
+    
+    For i = LBound(headers) To UBound(headers)
+        colDP = dpRow.Parent.Rows(1).Find(headers(i)).Column
+        colCP = cpRow.Parent.Rows(6).Find(headers(i)).Column
+        valDP = dpRow.Cells(1, colDP).Value
+        valCP = cpRow.Cells(1, colCP).Value
+        
+        If IsNumeric(valDP) And IsNumeric(valCP) Then
+            If Abs(valDP - valCP) > 0.0001 Then cpRow.Cells(1, colCP).Value = valDP
+        Else
+            If valDP <> valCP Then cpRow.Cells(1, colCP).Value = valDP
+        End If
+    Next i
+    
+    ' Compare DOW
+    expiryDP = dpRow.Cells(1, dpRow.Parent.Rows(1).Find("Expiry").Column).Value
+    expiryCP = cpRow.Cells(1, cpRow.Parent.Rows(6).Find("Expiry").Column).Value
+    
+    If Format(expiryDP, "ddd") <> Format(expiryCP, "ddd") Then
+        cpRow.Cells(1, cpRow.Parent.Rows(6).Find("Expiry").Column).Interior.Color = RGB(255, 127, 80)
+        checkDOW.Add cpRow.Cells(1, cpRow.Parent.Rows(6).Find("FXDC Ref").Column).Value
+    End If
+End Sub
+
+' === Run Macros ===
+Sub RunMacros(dowText As String, wbCP As Workbook)
+    Application.Run wbCP.Name & "!Fix" & dowText
+    Application.Run wbCP.Name & "!AQDQs"
+    Application.Run wbCP.Name & "!SortCustomers"
+End Sub
+
+' === Populate Audit ===
+Sub PopulateAudit(dpRows As Collection, wsCP As Worksheet, checkExpiry As Collection, checkDOW As Collection, wsAudit As Worksheet)
+    Dim i As Long, fxdcRef As Long
+    Dim colRef As Long, lastRow As Long
+    Dim rowIndex As Long
+    
+    ' Clear old data
+    wsAudit.Range("A11:F" & wsAudit.Rows.Count).ClearContents
+    
+    ' DP FXDC Refs → Column A
+    For i = 1 To dpRows.Count
+        fxdcRef = dpRows(i).Cells(1, dpRows(i).Parent.Rows(1).Find("FXDC Ref").Column).Value
+        wsAudit.Cells(10 + i, 1).Value = fxdcRef
+    Next i
+    
+    ' CP selected trades after SortCustomers → Column B
+    colRef = wsCP.Rows(6).Find("FXDC Ref").Column
+    lastRow = wsCP.Cells(wsCP.Rows.Count, colRef).End(xlUp).Row
+    rowIndex = 11
+    For i = 7 To lastRow
+        If wsCP.Rows(i).Hidden = False Then
+            wsAudit.Cells(rowIndex, 2).Value = wsCP.Cells(i, colRef).Value
+            rowIndex = rowIndex + 1
+        End If
+    Next i
+    
+    ' CheckExpiryForFXDCRef → Column E
+    For i = 1 To checkExpiry.Count
+        wsAudit.Cells(10 + i, 5).Value = checkExpiry(i)
+    Next i
+    
+    ' CheckDOWForFXDCRef → Column F
+    For i = 1 To checkDOW.Count
+        wsAudit.Cells(10 + i, 6).Value = checkDOW(i)
+    Next i
+    
+    ' Sort columns A, B, E, F numerically
+    SortColumn wsAudit, "A"
+    SortColumn wsAudit, "B"
+    SortColumn wsAudit, "E"
+    SortColumn wsAudit, "F"
+End Sub
+
+' === Helper: Sort Column ===
+Sub SortColumn(ws As Worksheet, colLetter As String)
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, colLetter).End(xlUp).Row
+    If lastRow > 11 Then
+        ws.Range(colLetter & "11:" & colLetter & lastRow).Sort _
+            Key1:=ws.Range(colLetter & "11"), Order1:=xlAscending, Header:=xlNo
+    End If
+End Sub
+
+' === Apply Conditional Formatting ===
+Sub ApplyConditionalFormatting(wsAudit As Worksheet)
+    Dim lastRowA As Long, lastRowB As Long, rngAll As Range
+    
+    lastRowA = wsAudit.Cells(wsAudit.Rows.Count, "A").End(xlUp).Row
+    lastRowB = wsAudit.Cells(wsAudit.Rows.Count, "B").End(xlUp).Row
+    
+    If lastRowA < 11 And lastRowB < 11 Then Exit Sub
+    
+    Set rngAll = wsAudit.Range("A11:A" & lastRowA & ",B11:B" & lastRowB)
+    rngAll.FormatConditions.Delete
+    
+    ' Formula: count occurrences across both columns
+    rngAll.FormatConditions.Add Type:=xlExpression, _
+        Formula1:="=COUNTIF($A$11:$A$" & lastRowA & ",A11)+COUNTIF($B$11:$B$" & lastRowB & ",A11)=1"
+    rngAll.FormatConditions(1).Interior.Color = RGB(255, 127, 80)
+End Sub
