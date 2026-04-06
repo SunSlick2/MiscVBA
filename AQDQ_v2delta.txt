@@ -1,0 +1,84 @@
+Function LoadDPData(ws As Worksheet, headers As Object) As Object
+    Dim dict As Object, i As Long, ref As Long, lastRow As Long
+    Set dict = CreateObject("Scripting.Dictionary")
+    lastRow = ws.Cells(ws.Rows.Count, headers("FXDC Ref")).End(xlUp).Row
+    
+    For i = 2 To lastRow
+        ref = Val(ws.Cells(i, headers("FXDC Ref")).Value)
+        ' Logic: 5 digits and the value in column "Live" is "Live"
+        If ref >= 10000 And ref <= 99999 And ws.Cells(i, headers("Live")).Value = "Live" Then
+            If dict.Exists(ref) Then
+                MsgBox "Duplicate FXDC Ref " & ref & " found in Daily Processes. Terminating.", vbCritical
+                Set LoadDPData = Nothing: Exit Function
+            End If
+            dict.Add ref, i
+        End If
+    Next i
+    
+    If dict.Count = 0 Then
+        MsgBox "No data in DP matches criteria (5-digit Ref & Live status). Terminating.", vbExclamation
+        Set LoadDPData = Nothing: Exit Function
+    End If
+    Set LoadDPData = dict
+End Function
+
+Sub PerformRowUpdate(wsCP As Worksheet, wsDP As Worksheet, rCP As Long, rDP As Long, hCP As Object, hDP As Object, colDOW As Collection)
+    ' 1. Standard String Comparisons (Now including Customer and Live)
+    Dim sArr, h: sArr = Array("Customer", "CCYpair", "Struct", "Ccy", "Live")
+    For Each h In sArr
+        If CStr(wsCP.Cells(rCP, hCP(h)).Value) <> CStr(wsDP.Cells(rDP, hDP(h)).Value) Then
+            wsCP.Cells(rCP, hCP(h)).Value = wsDP.Cells(rDP, hDP(h)).Value
+        End If
+    Next
+    
+    ' 2. Special Notional Handling
+    ' Strips the ' from CP for comparison, but adds it back if an update is needed
+    Dim dpNotional As String: dpNotional = Trim(CStr(wsDP.Cells(rDP, hDP("Notional")).Text))
+    Dim cpNotional As String: cpNotional = Trim(CStr(wsCP.Cells(rCP, hCP("Notional")).Value))
+    
+    If cpNotional <> dpNotional Then
+        wsCP.Cells(rCP, hCP("Notional")).Value = "'" & dpNotional
+    End If
+
+    ' 3. Double Comparisons
+    Dim dArr: dArr = Array("Lower eKI", "Lower Strike", "Upper Strike", "Upper eKI")
+    For Each h In dArr
+        If Abs(Val(wsCP.Cells(rCP, hCP(h)).Value) - Val(wsDP.Cells(rDP, hDP(h)).Value)) > 0.000001 Then
+            wsCP.Cells(rCP, hCP(h)).Value = wsDP.Cells(rDP, hDP(h)).Value
+        End If
+    Next
+    
+    ' 4. KO/Pivot Logic: Overwrite only if DP is NOT 0 and NOT blank
+    Dim dpKO As Variant: dpKO = wsDP.Cells(rDP, hDP("KO/Pivot")).Value
+    If dpKO <> 0 And Trim(CStr(dpKO)) <> "" Then
+        If Abs(Val(wsCP.Cells(rCP, hCP("KO/Pivot")).Value) - Val(dpKO)) > 0.000001 Then
+            wsCP.Cells(rCP, hCP("KO/Pivot")).Value = dpKO
+        End If
+    End If
+    
+    ' 5. DOW Check
+    If Format(wsDP.Cells(rDP, hDP("Expiry")).Value, "ddd") <> Format(wsCP.Cells(rCP, hCP("Expiry")).Value, "ddd") Then
+        wsCP.Cells(rCP, hCP("Expiry")).Interior.Color = RGB(255, 127, 80)
+        colDOW.Add wsCP.Cells(rCP, hCP("FXDC Ref")).Value
+    End If
+End Sub
+
+
+Sub AddNewCPRow(wsCP As Worksheet, wsDP As Worksheet, targetRow As Long, sourceRow As Long, hCP As Object, hDP As Object)
+    Dim head: For Each head In hDP.Keys
+        If hCP.Exists(head) Then
+            ' Ensure Notional is always treated as a string with a prefix
+            If head = "Notional" Then
+                wsCP.Cells(targetRow, hCP(head)).Value = "'" & Trim(CStr(wsDP.Cells(sourceRow, hDP(head)).Text))
+            Else
+                wsCP.Cells(targetRow, hCP(head)).Value = wsDP.Cells(sourceRow, hDP(head)).Value
+            End If
+        End If
+    Next
+    
+    ' Copy relative formulas from Row 7
+    Dim lastCol As Long: lastCol = wsCP.Cells(6, wsCP.Columns.Count).End(xlToLeft).Column
+    Dim c As Long: For c = 1 To lastCol
+        If wsCP.Cells(7, c).HasFormula Then wsCP.Cells(7, c).Copy wsCP.Cells(targetRow, c)
+    Next
+End Sub
