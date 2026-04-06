@@ -1,0 +1,244 @@
+Here is the complete, modularized code. You can copy this entire block into a single standard module in your **Client Positions.xlsm** workbook.
+
+```vba
+Option Explicit
+
+' ==============================================================================
+' MAIN CONTROLLER
+' ==============================================================================
+Sub ProcessClientPositions_Main()
+    Dim wbCP As Workbook, wbDP As Workbook
+    Dim wsCP As Worksheet, wsDP As Worksheet
+    Dim headersCP As Object, headersDP As Object
+    Dim dictDP As Object, dictCP As Object
+    Dim colNewRefs As New Collection, colDOWRefs As New Collection
+    
+    ' 1. Initialize and Open Files
+    Set wbCP = GetWorkbook("Client Positions.xlsm", "C:\Users\abc\OneDrive\Documents\Client Related\Client Positions.xlsm")
+    Set wbDP = GetWorkbook("Daily Processes.xlsm", "C:\Users\abc\OneDrive\Documents\Tools\Daily Processes.xlsm")
+    
+    Set wsCP = wbCP.Sheets("Position")
+    Set wsDP = wbDP.Sheets("Expiry")
+    
+    ' 2. Map Headers Dynamically
+    Set headersCP = GetHeaderDict(wsCP, 6)
+    Set headersDP = GetHeaderDict(wsDP, 1)
+    
+    ' 3. Validate and Load Data into Dictionaries (Checks for duplicates)
+    Set dictDP = LoadDPData(wsDP, headersDP)
+    If dictDP Is Nothing Then Exit Sub ' Error or no data handled in function
+    
+    Set dictCP = LoadCPData(wsCP, headersCP)
+    If dictCP Is Nothing Then Exit Sub ' Duplicate found handled in function
+    
+    ' 4. Core Processing: Sync DP to CP
+    SyncData wsCP, wsDP, dictDP, dictCP, headersCP, headersDP, colNewRefs, colDOWRefs
+    
+    ' 5. Run External Macros (FixDDD, AQDQs, SortCustomers)
+    RunPositionMacros wbCP, wsDP, dictDP, headersDP
+    
+    ' 6. Final Audit Reporting
+    GenerateAuditReport wbCP.Sheets("AuditAQDQ"), wsCP, dictDP, colNewRefs, colDOWRefs, headersCP
+    
+    MsgBox "Process Complete Successfully.", vbInformation
+End Sub
+
+' ==============================================================================
+' WORKBOOK & HEADER HELPERS
+' ==============================================================================
+Function GetWorkbook(fileName As String, filePath As String) As Workbook
+    On Error Resume Next
+    Set GetWorkbook = Workbooks(fileName)
+    If GetWorkbook Is Nothing Then Set GetWorkbook = Workbooks.Open(filePath)
+    On Error GoTo 0
+End Function
+
+Function GetHeaderDict(ws As Worksheet, rowIdx As Long) As Object
+    Dim dict As Object, lastCol As Long, i As Long
+    Set dict = CreateObject("Scripting.Dictionary")
+    lastCol = ws.Cells(rowIdx, ws.Columns.Count).End(xlToLeft).Column
+    For i = 1 To lastCol
+        If ws.Cells(rowIdx, i).Value <> "" Then
+            dict(Trim(ws.Cells(rowIdx, i).Value)) = i
+        End If
+    Next i
+    Set GetHeaderDict = dict
+End Function
+
+' ==============================================================================
+' DATA LOADING & VALIDATION
+' ==============================================================================
+Function LoadDPData(ws As Worksheet, headers As Object) As Object
+    Dim dict As Object, i As Long, ref As Long, lastRow As Long
+    Set dict = CreateObject("Scripting.Dictionary")
+    lastRow = ws.Cells(ws.Rows.Count, headers("FXDC Ref")).End(xlUp).Row
+    
+    For i = 2 To lastRow
+        ref = Val(ws.Cells(i, headers("FXDC Ref")).Value)
+        ' Logic: 5 digits (10000-99999) and Live status
+        If ref >= 10000 And ref <= 99999 And ws.Cells(i, headers("Live/Cash")).Value = "Live" Then
+            If dict.Exists(ref) Then
+                MsgBox "Duplicate FXDC Ref " & ref & " found in Daily Processes. Terminating.", vbCritical
+                Set LoadDPData = Nothing: Exit Function
+            End If
+            dict.Add ref, i
+        End If
+    Next i
+    
+    If dict.Count = 0 Then
+        MsgBox "No data in DP matches criteria. Terminating.", vbExclamation
+        Set LoadDPData = Nothing: Exit Function
+    End If
+    Set LoadDPData = dict
+End Function
+
+Function LoadCPData(ws As Worksheet, headers As Object) As Object
+    Dim dict As Object, i As Long, ref As Long, lastRow As Long
+    Set dict = CreateObject("Scripting.Dictionary")
+    lastRow = ws.Cells(ws.Rows.Count, headers("FXDC Ref")).End(xlUp).Row
+    
+    For i = 7 To lastRow
+        ref = Val(ws.Cells(i, headers("FXDC Ref")).Value)
+        If ref <> 0 Then
+            If dict.Exists(ref) Then
+                MsgBox "Duplicate FXDC Ref " & ref & " found in Client Positions. Terminating.", vbCritical
+                Set LoadCPData = Nothing: Exit Function
+            End If
+            dict.Add ref, i
+        End If
+    Next i
+    Set LoadCPData = dict
+End Function
+
+' ==============================================================================
+' SYNC & COMPARISON LOGIC
+' ==============================================================================
+Sub SyncData(wsCP As Worksheet, wsDP As Worksheet, dictDP As Object, dictCP As Object, _
+             hCP As Object, hDP As Object, colNew As Collection, colDOW As Collection)
+    
+    Dim ref As Variant, iDP As Long, jCP As Long, lastRowCP As Long
+    lastRowCP = wsCP.Cells(wsCP.Rows.Count, hCP("FXDC Ref")).End(xlUp).Row
+    
+    For Each ref In dictDP.Keys
+        iDP = dictDP(ref)
+        If dictCP.Exists(ref) Then
+            jCP = dictCP(ref)
+            ' Row matched: Compare and Update
+            PerformRowUpdate wsCP, wsDP, jCP, iDP, hCP, hDP, colDOW
+        Else
+            ' No match: Append Row
+            lastRowCP = lastRowCP + 1
+            AddNewCPRow wsCP, wsDP, lastRowCP, iDP, hCP, hDP
+            colNew.Add ref
+        End If
+    Next ref
+End Sub
+
+Sub PerformRowUpdate(wsCP As Worksheet, wsDP As Worksheet, rCP As Long, rDP As Long, hCP As Object, hDP As Object, colDOW As Collection)
+    ' Compare Strings
+    Dim sArr, h: sArr = Array("Client", "CCYpair", "Struct", "Ccy", "Notional", "Live/Cash")
+    For Each h In sArr
+        If CStr(wsCP.Cells(rCP, hCP(h)).Value) <> CStr(wsDP.Cells(rDP, hDP(h)).Value) Then
+            wsCP.Cells(rCP, hCP(h)).Value = wsDP.Cells(rDP, hDP(h)).Value
+        End If
+    Next
+    
+    ' Compare Doubles (Method of Difference)
+    Dim dArr: dArr = Array("Lower eKI", "Lower Strike", "KO/Pivot", "Upper Strike", "Upper eKI")
+    For Each h In dArr
+        If Abs(Val(wsCP.Cells(rCP, hCP(h)).Value) - Val(wsDP.Cells(rDP, hDP(h)).Value)) > 0.000001 Then
+            wsCP.Cells(rCP, hCP(h)).Value = wsDP.Cells(rDP, hDP(h)).Value
+        End If
+    Next
+    
+    ' DOW Check
+    Dim dpDate As Date: dpDate = wsDP.Cells(rDP, hDP("Expiry")).Value
+    Dim cpDate As Date: cpDate = wsCP.Cells(rCP, hCP("Expiry")).Value
+    If Format(dpDate, "ddd") <> Format(cpDate, "ddd") Then
+        wsCP.Cells(rCP, hCP("Expiry")).Interior.Color = RGB(255, 127, 80)
+        colDOW.Add wsCP.Cells(rCP, hCP("FXDC Ref")).Value
+    End If
+End Sub
+
+Sub AddNewCPRow(wsCP As Worksheet, wsDP As Worksheet, targetRow As Long, sourceRow As Long, hCP As Object, hDP As Object)
+    Dim head: For Each head In hDP.Keys
+        If hCP.Exists(head) Then wsCP.Cells(targetRow, hCP(head)).Value = wsDP.Cells(sourceRow, hDP(head)).Value
+    Next
+    
+    ' Copy relative formulas from Row 7
+    Dim lastCol As Long: lastCol = wsCP.Cells(6, wsCP.Columns.Count).End(xlToLeft).Column
+    Dim c As Long: For c = 1 To lastCol
+        If wsCP.Cells(7, c).HasFormula Then
+            wsCP.Cells(7, c).Copy wsCP.Cells(targetRow, c)
+        End If
+    Next
+End Sub
+
+' ==============================================================================
+' MACRO EXECUTION & AUDIT REPORTING
+' ==============================================================================
+Sub RunPositionMacros(wbCP As Workbook, wsDP As Worksheet, dictDP As Object, hDP As Object)
+    ' All DP records have same DOW; use the first one
+    Dim firstIdx As Long: firstIdx = dictDP.Items()(0)
+    Dim dDOW As String: dDOW = Format(wsDP.Cells(firstIdx, hDP("Expiry")).Value, "ddd")
+    
+    Application.Run "'" & wbCP.Name & "'!Fix" & dDOW
+    Application.Run "'" & wbCP.Name & "'!AQDQs"
+    Application.Run "'" & wbCP.Name & "'!SortCustomers"
+End Sub
+
+Sub GenerateAuditReport(wsA As Worksheet, wsCP As Worksheet, dictDP As Object, colNew As Collection, colDOW As Collection, hCP As Object)
+    wsA.Range("A11:F" & wsA.Rows.Count).Clear
+    
+    ' A: DP Refs
+    WriteAndSort wsA, "A", dictDP.Keys
+    
+    ' B: CP Filtered Refs after macros
+    Dim filtRefs As New Collection, i As Long
+    For i = 7 To wsCP.Cells(wsCP.Rows.Count, hCP("FXDC Ref")).End(xlUp).Row
+        If Not wsCP.Rows(i).Hidden Then
+            filtRefs.Add wsCP.Cells(i, hCP("FXDC Ref")).Value
+        End If
+    Next i
+    WriteAndSort wsA, "B", filtRefs
+    
+    ' E: New Entries, F: DOW Mismatches
+    WriteAndSort wsA, "E", colNew
+    WriteAndSort wsA, "F", colDOW
+    
+    ' Conditional Formatting for unique values in A and B
+    ApplyUniqueFormatting wsA
+End Sub
+
+Sub WriteAndSort(ws As Worksheet, colLet As String, data As Variant)
+    Dim i As Long
+    If IsObject(data) Or TypeName(data) = "Collection" Then
+        If data.Count = 0 Then Exit Sub
+        For i = 1 To data.Count: ws.Cells(10 + i, colLet).Value = data(i): Next
+    Else
+        ' Dictionary Keys (Array)
+        ws.Range(colLet & "11").Resize(UBound(data) + 1).Value = Application.Transpose(data)
+    End If
+    
+    ' Sort Numeric
+    Dim lastR As Long: lastR = ws.Cells(ws.Rows.Count, colLet).End(xlUp).Row
+    If lastR >= 11 Then
+        ws.Range(colLet & "11:" & colLet & lastR).Sort Key1:=ws.Range(colLet & "11"), Order1:=xlAscending, Header:=xlNo
+    End If
+End Sub
+
+Sub ApplyUniqueFormatting(ws As Worksheet)
+    Dim lastA As Long: lastA = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim lastB As Long: lastB = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
+    Dim maxRow As Long: maxRow = IIf(lastA > lastB, lastA, lastB)
+    
+    If maxRow < 11 Then Exit Sub
+    
+    With ws.Range("A11:B" & maxRow)
+        .FormatConditions.Delete
+        .FormatConditions.AddUniqueValues
+        .FormatConditions(.FormatConditions.Count).DupeUnique = xlUnique
+        .FormatConditions(.FormatConditions.Count).Interior.Color = RGB(255, 127, 80)
+    End With
+End Sub
+```
