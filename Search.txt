@@ -1,0 +1,90 @@
+update following code to search current outlook only. 
+
+#If VBA7 Then
+    Private Declare PtrSafe Function FindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
+    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hwnd As LongPtr) As Long
+#Else
+    Private Declare Function FindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hwnd As Long) As Long
+#End If
+
+Sub ShowSearchForm()
+    ' Display the UserForm
+    SearchOutlookForm.Show
+End Sub
+
+Sub UnifiedSearch(SearchType As String)
+    Dim OutlookApp As Object
+    Dim SearchQuery As String
+    Dim ActiveRow As Long
+    Dim SearchString As String
+    Dim SearchDate As Date
+    Dim SearchDateStr As String
+
+    ' Attempt to get the currently open instance of Outlook
+    On Error Resume Next
+    Set OutlookApp = GetObject(, "Outlook.Application")
+    On Error GoTo 0
+
+    ' Check if Outlook is running
+    If OutlookApp Is Nothing Then
+        MsgBox "Outlook is not running. Please open Outlook and try again.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Get the active row in Excel
+    ActiveRow = ActiveCell.row
+
+    ' Determine the search query based on the search type
+    If SearchType = "Strike" Then
+        ' Get the string from column G
+        SearchString = Trim(Cells(ActiveRow, "G").value)
+        If SearchString = "" Then
+            MsgBox "No value found in column G of the active row.", vbExclamation
+            Exit Sub
+        End If
+
+        ' Get the date from column AF
+        SearchDate = Cells(ActiveRow, "AF").value
+        If Not IsDate(SearchDate) Then
+            MsgBox "The value in column AF of the active row is not a valid date.", vbExclamation
+            Exit Sub
+        End If
+
+        ' Format the date for the Outlook search
+        SearchDateStr = Format(CDbl(SearchDate), "dd-mmm-yy")
+
+        ' Construct the search query
+        SearchQuery = SearchString & " sent:" & SearchDateStr
+    ElseIf SearchType = "SabreID" Then
+        ' Get the string from column W
+        SearchString = Trim(Cells(ActiveRow, "W").value)
+        If SearchString = "" Then
+            SearchString = Trim(Cells(ActiveRow, "AD").value)
+        End If
+
+        If SearchString = "" Then
+            MsgBox "No FXDC or SabreNative ref found", vbExclamation
+            Exit Sub
+        End If
+
+        ' Construct the search query
+        SearchQuery = SearchString
+    Else
+        MsgBox "Invalid search type specified.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Perform the search across all folders in the current Outlook profile
+    OutlookApp.ActiveExplorer.Search SearchQuery, 1 ' 1 all folders /  2 = olSearchScopeAllFolders
+
+' Find the Outlook window and bring it to the foreground
+    Dim OutlookHwnd As Variant
+    OutlookHwnd = FindWindow("rctrl_renwnd32", vbNullString)
+    If OutlookHwnd <> 0 Then
+        SetForegroundWindow OutlookHwnd
+    Else
+        MsgBox "Could not bring Outlook to the foreground.", vbExclamation
+    End If
+
+End Sub
