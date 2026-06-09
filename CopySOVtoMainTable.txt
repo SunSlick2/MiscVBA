@@ -1,0 +1,45 @@
+Sub CopyANtoH_IfDelta()
+
+    Dim ws          As Worksheet
+    Dim lastRowA    As Long
+    Dim ajLastRow   As Long
+    Dim ajRange     As Range
+    Dim matchCell   As Range
+    Dim i           As Long
+    Dim valA        As String
+
+    Set ws = ThisWorkbook.Sheets("ConrRisk8")
+
+    lastRowA  = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    ajLastRow = ws.Cells(ws.Rows.Count, "AJ").End(xlUp).Row
+
+    If lastRowA < 2 Or ajLastRow < 2 Then
+        MsgBox "Insufficient data in column A or AJ.", vbInformation
+        Exit Sub
+    End If
+
+    Set ajRange = ws.Range("AJ2:AJ" & ajLastRow)
+
+    For i = 2 To lastRowA
+        valA = Trim(CStr(ws.Cells(i, "A").Value))
+        If Len(valA) = 0 Then GoTo NextRow
+
+        Set matchCell = Nothing
+        On Error Resume Next
+        Set matchCell = ajRange.Find(What:=valA, LookIn:=xlValues, _
+                                     LookAt:=xlWhole, MatchCase:=False)
+        On Error GoTo 0
+
+        If Not matchCell Is Nothing Then
+            If StrComp(Trim(CStr(ws.Cells(matchCell.Row, "AK").Value)), _
+                       "Delta", vbTextCompare) = 0 Then
+                ws.Cells(i, "H").Value = ws.Cells(matchCell.Row, "AN").Value
+            End If
+        End If
+
+NextRow:
+    Next i
+
+    MsgBox "Done!", vbInformation
+
+End Sub
