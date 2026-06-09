@@ -1,0 +1,67 @@
+Sub MatchAndPopulateFromTSV()
+
+    Dim ws          As Worksheet
+    Dim tsvPath     As String
+    Dim fileNum     As Integer
+    Dim lineText    As String
+    Dim tsvData     As Object        ' Dictionary: key = col1, value = col2
+    Dim parts()     As String
+    Dim lastRow     As Long
+    Dim i           As Long
+    Dim lookupVal   As String
+    Dim matchVal    As Variant
+
+    ' --- Config ---
+    tsvPath = "C:\download\SOVTable.tsv"
+    Set ws = ThisWorkbook.Sheets("ConrRisk8")
+
+    ' --- Load TSV into dictionary ---
+    Set tsvData = CreateObject("Scripting.Dictionary")
+    tsvData.CompareMode = 1          ' vbTextCompare = case-insensitive
+
+    If Dir(tsvPath) = "" Then
+        MsgBox "TSV file not found at:" & vbCrLf & tsvPath, vbCritical
+        Exit Sub
+    End If
+
+    fileNum = FreeFile
+    Open tsvPath For Input As #fileNum
+    Do While Not EOF(fileNum)
+        Line Input #fileNum, lineText
+        lineText = Trim(lineText)
+        If Len(lineText) > 0 Then
+            parts = Split(lineText, vbTab)
+            If UBound(parts) >= 1 Then
+                Dim key As String
+                key = Trim(parts(0))
+                If Not tsvData.Exists(key) Then
+                    tsvData.Add key, Trim(parts(1))
+                End If
+            End If
+        End If
+    Loop
+    Close #fileNum
+
+    ' --- Loop through column AJ (col 36) from row 2 to last non-empty ---
+    lastRow = ws.Cells(ws.Rows.Count, "AJ").End(xlUp).Row
+
+    If lastRow < 2 Then
+        MsgBox "No data found in column AJ from row 2 onwards.", vbInformation
+        Exit Sub
+    End If
+
+    For i = 2 To lastRow
+        lookupVal = Trim(CStr(ws.Cells(i, "AJ").Value))
+
+        If Len(lookupVal) = 0 Then
+            ' Skip truly empty cells — leave AN untouched
+        ElseIf tsvData.Exists(lookupVal) Then
+            ws.Cells(i, "AN").Value = tsvData(lookupVal)
+        Else
+            ws.Cells(i, "AN").Value = "Not Found"
+        End If
+    Next i
+
+    MsgBox "Done! Processed rows 2 to " & lastRow & ".", vbInformation
+
+End Sub
