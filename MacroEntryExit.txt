@@ -1,0 +1,37 @@
+Option Explicit
+
+' Global variables to store the user's original Excel environment settings
+Public OriginalCalcState As XlCalculation
+Public OriginalScreenUpdate As Boolean
+Public OriginalEventsState As Boolean
+Public OriginalDisplayAlerts As Boolean
+
+''' <summary>
+''' Call this at the very beginning of your main macros.
+''' It saves the user's current settings and turns off Excel's triggers.
+''' </summary>
+Sub Macro_Entry()
+    ' 1. Capture current settings
+    OriginalCalcState = Application.Calculation
+    OriginalScreenUpdate = Application.ScreenUpdating
+    OriginalEventsState = Application.EnableEvents
+    OriginalDisplayAlerts = Application.DisplayAlerts
+    
+    ' 2. Optimize environment for macro speed (Prevents UDFs/Events from firing)
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+End Sub
+
+''' <summary>
+''' Call this at the very end (or error handler) of your main macros.
+''' It safely restores Excel to exactly how the user had it.
+''' </summary>
+Sub Macro_Exit()
+    ' Restore settings to their original states
+    Application.ScreenUpdating = OriginalScreenUpdate
+    Application.Calculation = OriginalCalcState
+    Application.EnableEvents = OriginalEventsState
+    Application.DisplayAlerts = OriginalDisplayAlerts
+End Sub
