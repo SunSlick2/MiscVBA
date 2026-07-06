@@ -1,0 +1,38 @@
+@echo off
+echo ===================================================
+echo   Closing Microsoft Edge and Clearing Browsing Data
+echo ===================================================
+
+:: 1. Force close Microsoft Edge
+echo Closing Microsoft Edge...
+taskkill /F /IM msedge.exe /T >nul 2>&1
+
+:: Give it a second to completely release file locks
+timeout /t 2 /nobreak >nul
+
+:: 2. Clear Edge Cache and History
+echo Clearing Cache and History...
+
+:: Define Edge User Data path
+set "EdgeData=%LocalAppData%\Microsoft\Edge\User Data"
+
+:: Delete Cache folders
+if exist "%EdgeData%" (
+    del /f /q /s "%EdgeData%\Default\Cache\*" >nul 2>&1
+    del /f /q /s "%EdgeData%\Default\Code Cache\*" >nul 2>&1
+    del /f /q /s "%EdgeData%\Default\GPUCache\*" >nul 2>&1
+    
+    :: Delete History, Cookies, and Web Data files
+    del /f /q "%EdgeData%\Default\History" >nul 2>&1
+    del /f /q "%EdgeData%\Default\History-journal" >nul 2>&1
+    del /f /q "%EdgeData%\Default\Cookies" >nul 2>&1
+    del /f /q "%EdgeData%\Default\Web Data" >nul 2>&1
+    del /f /q "%EdgeData%\Default\Web Data-journal" >nul 2>&1
+    
+    echo Done! Cache and History have been cleared.
+) else (
+    echo Edge data directory not found.
+)
+
+echo ===================================================
+pause
