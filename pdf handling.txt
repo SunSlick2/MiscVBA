@@ -1,0 +1,42 @@
+Sub RedactKeyword(pdfPath As String, keyword As String)
+    Dim PDFApp As Object, DVDoc As Object, DDDoc As Object
+    Dim TextSelect As Object, DDPage As Object, RedactRect As Object, RedactAnnot As Object
+
+    Set PDFApp = CreateObject("PDFPlus.App")
+    Set DVDoc = CreateObject("PDFPlus.DVDoc")
+
+    If Not DVDoc.Open(pdfPath) Then
+        MsgBox "Could not open PDF.", vbCritical
+        Exit Sub
+    End If
+
+    Set DDDoc = DVDoc.GetDDDoc()
+    Set TextSelect = DDDoc.CreateTextSelect(keyword)
+
+    If TextSelect Is Nothing Then GoTo NotFound
+    If TextSelect.GetNumText() = 0 Then GoTo NotFound
+
+    Set RedactRect = TextSelect.GetBoundingRect()
+    Set DDPage = TextSelect.GetPage()
+    Set RedactAnnot = DDPage.AddNewAnnot("Redact", RedactRect)   ' confirm exact subtype string in Object Browser
+
+    PDFApp.MenuItemExecute "ApplyReadaction"   ' their typo, not mine
+    DDDoc.Save
+
+    TextSelect.Destroy
+    DVDoc.Close False
+    PDFApp.Exit
+    Exit Sub
+
+NotFound:
+    MsgBox "Keyword not found in PDF — redaction not applied.", vbCritical
+    DVDoc.Close False
+    PDFApp.Exit
+End Sub
+
+Sub EncryptPDF(pdfPath As String, password As String)
+    Dim PDFApp As Object
+    Set PDFApp = CreateObject("PDFPlus.App")
+    PDFApp.ExecuteBatchSequence "EncryptWithPassword", pdfPath   ' confirm exact params
+    PDFApp.Exit
+End Sub
