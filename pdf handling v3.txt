@@ -1,0 +1,57 @@
+Sub RedactKeywordInPDF()
+    Dim app As App
+    Dim dvDoc As DVDoc
+    Dim ddDoc As DDDoc
+    Dim ddPage As DDPage
+    Dim textSel As DDTextSelect
+    Dim hilite As HiliteList
+    Dim rect As Rect
+    
+    Dim pdfPath As String
+    Dim keyword As String
+    Dim i As Long, j As Long
+    
+    ' === configure ===
+    pdfPath = "C:\Path\To\Your\File.pdf"
+    keyword = "secret"   ' substring to redact
+    
+    ' === open PDF ===
+    Set app = New App
+    Set dvDoc = app.Open(pdfPath)          ' DVDoc
+    Set ddDoc = dvDoc.GetDDDoc             ' DDDoc
+    
+    ' === loop pages ===
+    For i = 0 To ddDoc.GetInfo("NumPages") - 1
+        Set ddPage = ddDoc.AcquirePage(i)
+        
+        ' create text selection for whole page
+        Set textSel = ddDoc.CreateTextSelect(ddPage, 0, ddPage.GetSize.Y)
+        
+        ' iterate through text runs
+        For j = 0 To textSel.GetNumText - 1
+            Dim txt As String
+            txt = textSel.GetText(j)
+            
+            If InStr(1, txt, keyword, vbTextCompare) > 0 Then
+                ' get bounding rect of this text run
+                Set rect = textSel.GetBoundingRect(j)
+                
+                ' create hilite list and add rect
+                Set hilite = New HiliteList
+                hilite.Add rect
+                
+                ' apply redaction by creating a word hilite
+                ddPage.CreateWordHilite hilite
+                ' then overlay a filled annotation to blackout
+                ddPage.AddNewAnnot "Redact", rect
+            End If
+        Next j
+        
+        textSel.Destroy
+    Next i
+    
+    ' === save redacted PDF ===
+    ddDoc.Save pdfPath & "_redacted.pdf", DDSaveFull
+    
+    dvDoc.Close
+End Sub
