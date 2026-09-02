@@ -1,0 +1,42 @@
+Sub RedactKeywordInPDF()
+    Dim pdfApp As PDFPlus.Application
+    Dim pdfDoc As PDFPlus.Document
+    Dim pdfPage As PDFPlus.Page
+    Dim pdfSearch As PDFPlus.Search
+    Dim pdfRedaction As PDFPlus.Redaction
+    
+    Dim pdfPath As String
+    Dim keyword As String
+    
+    ' === configure ===
+    pdfPath = "C:\Path\To\Your\File.pdf"
+    keyword = "secret"   ' substring to redact
+    
+    ' === open PDF ===
+    Set pdfApp = New PDFPlus.Application
+    Set pdfDoc = pdfApp.OpenDocument(pdfPath)
+    
+    ' === loop pages ===
+    Dim i As Long
+    For i = 1 To pdfDoc.PageCount
+        Set pdfPage = pdfDoc.Pages(i)
+        
+        ' search occurrences of substring
+        Set pdfSearch = pdfPage.CreateSearch(keyword, True) ' True = case-insensitive
+        
+        Do While pdfSearch.FindNext
+            ' create redaction over found bounds
+            Set pdfRedaction = pdfPage.CreateRedaction(pdfSearch.Bounds)
+            pdfRedaction.Apply
+        Loop
+    Next i
+    
+    ' === save redacted PDF ===
+    pdfDoc.SaveAs Replace(pdfPath, ".pdf", "_redacted.pdf")
+    
+    ' cleanup
+    pdfDoc.Close
+    pdfApp.Quit
+    
+    MsgBox "Redaction complete."
+End Sub
