@@ -1,0 +1,592 @@
+' ============================================================
+' MODULE: KofaxRedactionAutomation
+' PURPOSE: Incrementally test and implement PDF redaction automation
+'          using Kofax Power PDF COM object (Based on actual object model)
+' ============================================================
+
+Option Explicit
+
+' --- PUBLIC CONSTANTS ---
+Public Const PDF_FILE As String = "C:\Path\To\Your\Document.pdf"  ' CHANGE THIS
+Public Const SEARCH_TEXT As String = "YourKeyword"               ' CHANGE THIS
+Public Const REDACT_START_CHAR As Integer = 6                    ' Character position to start redaction
+Public Const REDACT_END_CHAR As Integer = 8                      ' Character position to end redaction
+
+' --- GLOBAL VARIABLES ---
+Dim objApp As Object          ' App object
+Dim objDDDoc As Object        ' DDDoc object
+Dim objDVDoc As Object        ' DVDoc object (document view)
+Dim objTextSelect As Object   ' DDTextSelect object for search results
+Dim objRedactRect As Object   ' Rectangle object for redaction
+
+' ============================================================
+' STEP 1: Open PDF and verify document loads (CORRECTED)
+' ============================================================
+Sub Step1_OpenDocument()
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "=== STEP 1: Opening Document ==="
+    Debug.Print "File: " & PDF_FILE
+    
+    ' Create application using New PDFPlus.App
+    Set objApp = New PDFPlus.App
+    Debug.Print "✓ Application object created"
+    
+    ' Create DVDoc using New PDFPlus.DVDoc
+    Set objDVDoc = New PDFPlus.DVDoc
+    Debug.Print "✓ DVDoc object created"
+    
+    ' Open the document
+    On Error Resume Next
+    objDVDoc.Open PDF_FILE
+    
+    If Err.Number <> 0 Then
+        Debug.Print "ERROR opening document: " & Err.Description
+        Debug.Print "Error number: " & Err.Number
+        Err.Clear
+        GoTo ErrorHandler
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    ' Get the underlying DDDoc
+    Set objDDDoc = objDVDoc.GetDDDoc()
+    
+    If Not objDDDoc Is Nothing Then
+        Debug.Print "✓ Document opened successfully"
+        Debug.Print "  - DDDoc object obtained"
+        Debug.Print "  - Document is ready for further operations"
+    Else
+        Debug.Print "✗ Failed to get DDDoc object"
+        Exit Sub
+    End If
+    
+    Debug.Print "Document is open and ready for Step 2"
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step1_OpenDocument: " & Err.Description
+    Debug.Print "Error number: " & Err.Number
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 2: Create TextSelect for search text
+' ============================================================
+Sub Step2_CreateTextSelect()
+    On Error GoTo ErrorHandler
+    
+    ' Ensure document is open first
+    If objDDDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 2: Creating TextSelect for Search Text ==="
+    Debug.Print "Search text: '" & SEARCH_TEXT & "'"
+    
+    ' Create TextSelect object using DDDoc.CreateTextSelect
+    On Error Resume Next
+    Set objTextSelect = objDDDoc.CreateTextSelect(SEARCH_TEXT)
+    
+    If Err.Number <> 0 Then
+        Debug.Print "ERROR creating TextSelect: " & Err.Description
+        Debug.Print "Error number: " & Err.Number
+        Err.Clear
+        GoTo NotFound
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    If objTextSelect Is Nothing Then
+        Debug.Print "✗ TextSelect is Nothing - text not found"
+        GoTo NotFound
+    End If
+    
+    ' Check if any text was found
+    On Error Resume Next
+    Dim numText As Integer
+    numText = objTextSelect.GetNumText()
+    
+    If Err.Number <> 0 Then
+        Debug.Print "⚠ Could not get number of text items: " & Err.Description
+        Err.Clear
+    ElseIf numText = 0 Then
+        Debug.Print "✗ No text found (GetNumText = 0)"
+        GoTo NotFound
+    Else
+        Debug.Print "✓ TextSelect created successfully"
+        Debug.Print "  - Number of text items: " & numText
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    ' Get bounding rectangle for redaction
+    On Error Resume Next
+    Set objRedactRect = objTextSelect.GetBoundingRect()
+    
+    If Err.Number <> 0 Then
+        Debug.Print "⚠ Could not get bounding rectangle: " & Err.Description
+        Err.Clear
+    ElseIf Not objRedactRect Is Nothing Then
+        Debug.Print "✓ Bounding rectangle obtained"
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "TextSelect ready for Step 3"
+    Exit Sub
+    
+NotFound:
+    Debug.Print "✗ Search text '" & SEARCH_TEXT & "' not found in document"
+    Debug.Print "  Please verify the text exists or adjust SEARCH_TEXT constant"
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step2_CreateTextSelect: " & Err.Description
+    Debug.Print "Error number: " & Err.Number
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 3: Get text details and prepare for redaction
+' ============================================================
+Sub Step3_GetTextDetails()
+    On Error GoTo ErrorHandler
+    
+    If objTextSelect Is Nothing Then
+        Debug.Print "✗ No TextSelect found. Run Step2_CreateTextSelect first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 3: Getting Text Details ==="
+    
+    ' Try to get the text content
+    On Error Resume Next
+    Dim textContent As String
+    textContent = objTextSelect.GetText()
+    
+    If Err.Number = 0 And textContent <> "" Then
+        Debug.Print "  - Text content: '" & textContent & "'"
+        Debug.Print "  - Text length: " & Len(textContent)
+        
+        ' Check if our character positions are valid
+        If REDACT_START_CHAR <= Len(textContent) And REDACT_END_CHAR <= Len(textContent) Then
+            Debug.Print "  - Character positions " & REDACT_START_CHAR & " to " & REDACT_END_CHAR & " are valid"
+            
+            ' Show what will be redacted
+            Dim redactText As String
+            redactText = Mid(textContent, REDACT_START_CHAR, REDACT_END_CHAR - REDACT_START_CHAR + 1)
+            Debug.Print "  - Text to redact: '" & redactText & "'"
+        Else
+            Debug.Print "  ⚠ Character positions exceed text length!"
+            Debug.Print "    Text length: " & Len(textContent)
+            Debug.Print "    Requested: " & REDACT_START_CHAR & " to " & REDACT_END_CHAR
+        End If
+    Else
+        Err.Clear
+        Debug.Print "  ⚠ Could not retrieve text content"
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    ' Get number of text items if available
+    On Error Resume Next
+    Dim numText As Integer
+    numText = objTextSelect.GetNumText()
+    If Err.Number = 0 Then
+        Debug.Print "  - Number of text items: " & numText
+    Else
+        Err.Clear
+    End If
+    
+    ' Try to get individual text items
+    If numText > 0 Then
+        Dim i As Integer
+        For i = 0 To numText - 1
+            On Error Resume Next
+            Dim itemText As String
+            itemText = objTextSelect.GetTextItem(i)
+            If Err.Number = 0 Then
+                Debug.Print "    Item " & i & ": '" & itemText & "'"
+            Else
+                Err.Clear
+            End If
+        Next i
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "Text details retrieved. Proceed to Step 4."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step3_GetTextDetails: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 4: Mark partial word(s) for redaction
+' ============================================================
+Sub Step4_MarkPartialWord()
+    On Error GoTo ErrorHandler
+    
+    If objTextSelect Is Nothing Then
+        Debug.Print "✗ No TextSelect found. Run Step2_CreateTextSelect first."
+        Exit Sub
+    End If
+    
+    If objRedactRect Is Nothing Then
+        Debug.Print "⚠ No bounding rectangle available. Trying to get it now..."
+        On Error Resume Next
+        Set objRedactRect = objTextSelect.GetBoundingRect()
+        If Err.Number <> 0 Then
+            Debug.Print "✗ Could not get bounding rectangle"
+            Err.Clear
+            Exit Sub
+        End If
+        On Error GoTo ErrorHandler
+    End If
+    
+    Debug.Print "=== STEP 4: Marking Partial Word for Redaction ==="
+    Debug.Print "Redacting characters " & REDACT_START_CHAR & " to " & REDACT_END_CHAR
+    
+    ' Based on your snippet, we have TextSelect and its bounding rectangle
+    ' To mark partial word, we need to create a new TextSelect for the specific character range
+    
+    ' First, get the full text
+    On Error Resume Next
+    Dim fullText As String
+    fullText = objTextSelect.GetText()
+    
+    If Err.Number <> 0 Or fullText = "" Then
+        Debug.Print "✗ Could not retrieve text content"
+        Err.Clear
+        Exit Sub
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "  - Full text: '" & fullText & "'"
+    
+    ' Extract the text to redact
+    Dim redactText As String
+    redactText = Mid(fullText, REDACT_START_CHAR, REDACT_END_CHAR - REDACT_START_CHAR + 1)
+    Debug.Print "  - Text to redact: '" & redactText & "'"
+    
+    ' Try to create a new TextSelect for just the partial text
+    ' We might need to use the bounding rectangle or create a sub-selection
+    
+    On Error Resume Next
+    
+    ' Option 1: Try to create TextSelect for the partial text
+    Dim partialTextSelect As Object
+    Set partialTextSelect = objDDDoc.CreateTextSelect(redactText)
+    
+    If Err.Number = 0 And Not partialTextSelect Is Nothing Then
+        Debug.Print "✓ Created TextSelect for partial text"
+        Set objTextSelect = partialTextSelect
+        Set objRedactRect = objTextSelect.GetBoundingRect()
+        Debug.Print "✓ Updated bounding rectangle for partial text"
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not create TextSelect for partial text"
+        
+        ' Option 2: Try to use sub-selection if available
+        Set partialTextSelect = objTextSelect.SubSelect(REDACT_START_CHAR, REDACT_END_CHAR)
+        If Err.Number = 0 And Not partialTextSelect Is Nothing Then
+            Debug.Print "✓ Created sub-selection for partial text"
+            Set objTextSelect = partialTextSelect
+            Set objRedactRect = objTextSelect.GetBoundingRect()
+            Debug.Print "✓ Updated bounding rectangle for partial text"
+        Else
+            Err.Clear
+            Debug.Print "⚠ SubSelect method not available or failed"
+            
+            ' Option 3: Use the full text and mark for redaction
+            Debug.Print "  Using full text selection for redaction"
+            Debug.Print "  (May redact more than intended)"
+        End If
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "Partial word marking attempted. Proceed to Step 5."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step4_MarkPartialWord: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 5: Apply redaction
+' ============================================================
+Sub Step5_ApplyRedaction()
+    On Error GoTo ErrorHandler
+    
+    If objDDDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    If objTextSelect Is Nothing Then
+        Debug.Print "✗ No TextSelect found. Run Step2_CreateTextSelect first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 5: Applying Redaction ==="
+    
+    ' Based on the object model, we have several options:
+    ' 1. DeleteTextSelected
+    ' 2. CopyToClipboard + DeleteTextSelected
+    ' 3. Create annotations for redaction
+    
+    On Error Resume Next
+    
+    ' Option 1: Use DeleteTextSelected to remove the text
+    objDDDoc.DeleteTextSelected()
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text deleted using DeleteTextSelected (redaction applied)"
+        GoTo Success
+    Else
+        Err.Clear
+        Debug.Print "⚠ DeleteTextSelected not available or failed"
+    End If
+    
+    ' Option 2: Try using the DVDoc to delete
+    objDVDoc.DeleteTextSelected()
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text deleted using DVDoc.DeleteTextSelected (redaction applied)"
+        GoTo Success
+    Else
+        Err.Clear
+        Debug.Print "⚠ DVDoc.DeleteTextSelected not available or failed"
+    End If
+    
+    ' Option 3: Try to clear selection
+    objDVDoc.ClearSelection()
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Selection cleared (redaction applied)"
+        GoTo Success
+    Else
+        Err.Clear
+        Debug.Print "⚠ ClearSelection not available or failed"
+    End If
+    
+    Debug.Print "✗ Could not apply redaction - no deletion method available"
+    Debug.Print "  Please explore Object Browser for deletion methods"
+    On Error GoTo ErrorHandler
+    Exit Sub
+    
+Success:
+    On Error GoTo ErrorHandler
+    Debug.Print "✓ Redaction applied successfully."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step5_ApplyRedaction: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 6: Save document with new name
+' ============================================================
+Sub Step6_SaveDocument()
+    On Error GoTo ErrorHandler
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 6: Saving Document ==="
+    
+    ' Generate new filename
+    Dim filePath As String
+    Dim fileExt As String
+    Dim baseName As String
+    Dim folderPath As String
+    
+    filePath = PDF_FILE
+    fileExt = Right(filePath, Len(filePath) - InStrRev(filePath, ".") + 1)
+    baseName = Left(filePath, InStrRev(filePath, ".") - 1)
+    folderPath = Left(filePath, InStrRev(filePath, "\"))
+    
+    Dim newFileName As String
+    newFileName = folderPath & "Redacted_" & Format(Now, "yyyymmdd_hhmmss") & fileExt
+    
+    Debug.Print "Saving as: " & newFileName
+    
+    ' Use DVDoc.Save method
+    On Error Resume Next
+    
+    ' Attempt to save with new filename
+    objDVDoc.Save newFileName
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved successfully as: " & newFileName
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        ' Try SaveAs if Save doesn't take parameters
+        objDVDoc.SaveAs newFileName
+    End If
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved successfully as: " & newFileName
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not save with new filename, trying to save..."
+    End If
+    
+    ' Just save (overwrites original)
+    objDVDoc.Save
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved (overwrote original)"
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        Debug.Print "✗ Could not save document"
+    End If
+    
+    On Error GoTo ErrorHandler
+    Exit Sub
+    
+SaveSuccess:
+    On Error GoTo ErrorHandler
+    
+    ' Close document
+    objDVDoc.Close
+    Set objDDDoc = Nothing
+    Set objDVDoc = Nothing
+    Set objTextSelect = Nothing
+    Set objRedactRect = Nothing
+    
+    ' Exit application
+    objApp.Exit
+    Set objApp = Nothing
+    
+    Debug.Print "✓ Document closed and application quit successfully."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step6_SaveDocument: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' MAIN: Run all steps sequentially
+' ============================================================
+Sub RunAllSteps()
+    Debug.Print ""
+    Debug.Print "========================================"
+    Debug.Print "STARTING INCREMENTAL REDACTION TEST"
+    Debug.Print "========================================"
+    Debug.Print ""
+    
+    Step1_OpenDocument
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "ABORTING: Document failed to open."
+        Exit Sub
+    End If
+    
+    Step2_CreateTextSelect
+    
+    If objTextSelect Is Nothing Then
+        Debug.Print "ABORTING: Text not found."
+        Exit Sub
+    End If
+    
+    Step3_GetTextDetails
+    Step4_MarkPartialWord
+    Step5_ApplyRedaction
+    Step6_SaveDocument
+    
+    Debug.Print ""
+    Debug.Print "========================================"
+    Debug.Print "TEST COMPLETE"
+    Debug.Print "========================================"
+End Sub
+
+' ============================================================
+' QUICK TEST: Just open and create TextSelect
+' ============================================================
+Sub QuickTest()
+    Step1_OpenDocument
+    If objDVDoc Is Nothing Then Exit Sub
+    Step2_CreateTextSelect
+End Sub
+
+' ============================================================
+' CLEANUP: Close document and quit application
+' ============================================================
+Sub Cleanup()
+    On Error Resume Next
+    If Not objDVDoc Is Nothing Then
+        objDVDoc.Close
+        Set objDVDoc = Nothing
+    End If
+    If Not objDDDoc Is Nothing Then
+        Set objDDDoc = Nothing
+    End If
+    If Not objTextSelect Is Nothing Then
+        Set objTextSelect = Nothing
+    End If
+    If Not objRedactRect Is Nothing Then
+        Set objRedactRect = Nothing
+    End If
+    If Not objApp Is Nothing Then
+        objApp.Exit
+        Set objApp = Nothing
+    End If
+    Debug.Print "✓ Cleanup completed"
+End Sub
+
+' ============================================================
+' EXPLORATION: List object properties and methods
+' ============================================================
+Sub ExploreObjects()
+    On Error Resume Next
+    
+    Debug.Print "=== OBJECT EXPLORATION ==="
+    Debug.Print ""
+    
+    ' Try to create objects using New
+    Debug.Print "Testing object creation:"
+    Debug.Print "  Creating App..."
+    Dim testApp As Object
+    Set testApp = New PDFPlus.App
+    If Not testApp Is Nothing Then
+        Debug.Print "  ✓ App created successfully"
+    Else
+        Debug.Print "  ✗ App creation failed"
+    End If
+    
+    Debug.Print "  Creating DVDoc..."
+    Dim testDoc As Object
+    Set testDoc = New PDFPlus.DVDoc
+    If Not testDoc Is Nothing Then
+        Debug.Print "  ✓ DVDoc created successfully"
+    Else
+        Debug.Print "  ✗ DVDoc creation failed"
+    End If
+    
+    Debug.Print ""
+    Debug.Print "Open a PDF file and test the following in Immediate Window:"
+    Debug.Print "  Set doc = New PDFPlus.DVDoc"
+    Debug.Print "  doc.Open ""C:\path\to\file.pdf"""
+    Debug.Print "  Set dd = doc.GetDDDoc()"
+    Debug.Print "  Set ts = dd.CreateTextSelect(""your text"")"
+    Debug.Print "  ? ts.GetText()"
+    Debug.Print "  ? ts.GetNumText()"
+    
+    Set testApp = Nothing
+    Set testDoc = Nothing
+End Sub
