@@ -1,0 +1,51 @@
+' ============================================================
+' STEP 1: Open PDF and verify document loads
+' ============================================================
+Sub Step1_OpenDocument()
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "=== STEP 1: Opening Document ==="
+    Debug.Print "File: " & PDF_FILE
+    
+    ' Create application using New PDFPlus.App
+    Set objApp = New PDFPlus.App
+    Debug.Print "✓ Application object created"
+    
+    ' Create DVDoc using New PDFPlus.DVDoc (Document VIEW)
+    Set objDVDoc = New PDFPlus.DVDoc
+    Debug.Print "✓ DVDoc (Document View) object created"
+    
+    ' Open the document using DVDoc (View)
+    On Error Resume Next
+    objDVDoc.Open PDF_FILE
+    
+    If Err.Number <> 0 Then
+        Debug.Print "ERROR opening document: " & Err.Description
+        Debug.Print "Error number: " & Err.Number
+        Err.Clear
+        GoTo ErrorHandler
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    ' IMPORTANT: Get DDDoc (Document DATA) from DVDoc (View)
+    Set objDDDoc = objDVDoc.GetDDDoc()
+    
+    If Not objDDDoc Is Nothing Then
+        Debug.Print "✓ DDDoc (Document Data) object obtained from DVDoc"
+        Debug.Print "  - DVDoc (View): Handles display, search, navigation, save"
+        Debug.Print "  - DDDoc (Data): Handles content, text manipulation, redaction"
+        Debug.Print "  - Document is ready for further operations"
+    Else
+        Debug.Print "✗ Failed to get DDDoc object from DVDoc"
+        Exit Sub
+    End If
+    
+    Debug.Print "Document is open and ready for Step 2"
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step1_OpenDocument: " & Err.Description
+    Debug.Print "Error number: " & Err.Number
+    Resume Next
+End Sub
