@@ -1,0 +1,576 @@
+' ============================================================
+' MODULE: KofaxRedactionAutomation
+' PURPOSE: Incrementally test and implement PDF redaction automation
+'          using Kofax Power PDF COM object (Based on actual object model)
+' ============================================================
+
+Option Explicit
+
+' --- PUBLIC CONSTANTS ---
+Public Const PDF_FILE As String = "C:\Path\To\Your\Document.pdf"  ' CHANGE THIS
+Public Const SEARCH_TEXT As String = "YourKeyword"               ' CHANGE THIS
+Public Const REDACT_START_CHAR As Integer = 6                    ' Character position to start redaction
+Public Const REDACT_END_CHAR As Integer = 8                      ' Character position to end redaction
+
+' --- GLOBAL VARIABLES ---
+Dim objApp As Object          ' App object (global)
+Dim objDDDoc As Object        ' DDDoc object
+Dim objDVDoc As Object        ' DVDoc object (document view)
+Dim objDDTextSelect As Object ' DDTextSelect object for search results
+
+' ============================================================
+' STEP 1: Open PDF and verify document loads
+' ============================================================
+Sub Step1_OpenDocument()
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "=== STEP 1: Opening Document ==="
+    Debug.Print "File: " & PDF_FILE
+    
+    ' Get the global App object
+    Set objApp = CreateObject("PDFPlus.Application")
+    Debug.Print "✓ Application object created"
+    
+    ' Open document using App methods
+    ' Based on object model, we need to use DVDoc.Open or App.Open
+    On Error Resume Next
+    
+    ' Try different open methods
+    Set objDVDoc = objApp.Open(PDF_FILE)
+    
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Try alternative: GetDVDoc then Open
+        Set objDVDoc = objApp.GetDVDoc()
+        If Not objDVDoc Is Nothing Then
+            objDVDoc.Open PDF_FILE
+        End If
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "✗ Failed to open document"
+        Exit Sub
+    End If
+    
+    ' Get the underlying DDDoc
+    Set objDDDoc = objDVDoc.GetDDDoc()
+    
+    If Not objDDDoc Is Nothing Then
+        Debug.Print "✓ Document opened successfully"
+        Debug.Print "  - DDDoc object obtained"
+        Debug.Print "  - Document is ready for further operations"
+    Else
+        Debug.Print "✗ Failed to get DDDoc object"
+        Exit Sub
+    End If
+    
+    Debug.Print "Document is open and ready for Step 2"
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step1_OpenDocument: " & Err.Description
+    Debug.Print "Error number: " & Err.Number
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 2: Test FindText functionality
+' ============================================================
+Sub Step2_TestFindText()
+    On Error GoTo ErrorHandler
+    
+    ' Ensure document is open first
+    If objDVDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 2: Testing FindText Method ==="
+    Debug.Print "Search text: '" & SEARCH_TEXT & "'"
+    
+    ' FindText method signature from object model:
+    ' FindText(searchText, startPage?, caseSensitive?, wholeWord?, ...)
+    ' We need to determine exact parameters
+    
+    Dim searchResult As Object
+    Dim found As Boolean
+    
+    On Error Resume Next
+    
+    ' Try different parameter combinations
+    ' Attempt 1: Basic search (text only)
+    Set searchResult = objDVDoc.FindText(SEARCH_TEXT)
+    
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Attempt 2: With case sensitivity and whole word
+        Set searchResult = objDVDoc.FindText(SEARCH_TEXT, 1, True, True)
+    End If
+    
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Attempt 3: Try to get DDTextSelect object
+        Set objDDTextSelect = objDVDoc.FindText(SEARCH_TEXT, 1, True, True, 0)
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    If objDDTextSelect Is Nothing And searchResult Is Nothing Then
+        Debug.Print "✗ FindText returned no results or method not found"
+        Debug.Print "  Trying alternate approach via DDDoc..."
+        
+        ' Try via DDDoc
+        On Error Resume Next
+        Set objDDTextSelect = objDDDoc.FindText(SEARCH_TEXT)
+        On Error GoTo ErrorHandler
+        
+        If objDDTextSelect Is Nothing Then
+            Debug.Print "✗ Could not find text. Please verify the search text exists."
+            Debug.Print "  Also check Object Browser for correct FindText parameters."
+        Else
+            Debug.Print "✓ Text found via DDDoc.FindText"
+        End If
+    Else
+        If Not searchResult Is Nothing Then
+            Debug.Print "✓ Text found via DVDoc.FindText"
+            Set objDDTextSelect = searchResult
+        Else
+            Debug.Print "✓ Text found and DDTextSelect object obtained"
+        End If
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step2_TestFindText: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 3: Get text selection and redaction preparation
+' ============================================================
+Sub Step3_PrepareRedaction()
+    On Error GoTo ErrorHandler
+    
+    If objDDTextSelect Is Nothing Then
+        Debug.Print "✗ No text selection found. Run Step2_TestFindText first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 3: Preparing Text for Redaction ==="
+    
+    ' Based on object model, we have DDTextSelect object
+    ' We can use it to highlight or mark text for redaction
+    
+    Debug.Print "Character range to redact: " & REDACT_START_CHAR & " to " & REDACT_END_CHAR
+    
+    ' Try to create a hilite for the selected text
+    ' DDDoc has CreateWordHilite and CreatePageHilite methods
+    
+    On Error Resume Next
+    
+    ' Create a word hilite (highlight)
+    Dim hilite As Object
+    Set hilite = objDDDoc.CreateWordHilite(objDDTextSelect)
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Created word hilite for selected text"
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not create word hilite"
+    End If
+    
+    ' Try to mark for redaction using DDDoc methods
+    ' The object model shows DDDoc has methods for text selection
+    
+    ' Show the text selection (from object model: ShowTextSelected)
+    objDVDoc.ShowTextSelected True
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text selection shown in document"
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not show text selection"
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "Text prepared for redaction. Proceed to Step 4."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step3_PrepareRedaction: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 4: Mark partial word(s) for redaction (using DDTextSelect)
+' ============================================================
+Sub Step4_MarkPartialWord()
+    On Error GoTo ErrorHandler
+    
+    If objDDTextSelect Is Nothing Then
+        Debug.Print "✗ No text selection found. Run Step2_TestFindText first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 4: Marking Partial Word for Redaction ==="
+    Debug.Print "Redacting characters " & REDACT_START_CHAR & " to " & REDACT_END_CHAR
+    
+    ' Since DDTextSelect represents the found text,
+    ' we need to select specific character range within it
+    
+    ' Try to set text selection to specific character range
+    On Error Resume Next
+    
+    ' Attempt to select specific range in the found text
+    ' DDTextSelect likely has properties like Start and End positions
+    
+    ' Try to modify selection to specific character positions
+    objDVDoc.SetTextSelection objDDTextSelect
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text selection set"
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not set text selection via SetTextSelection"
+    End If
+    
+    ' Now try to redact the specific characters
+    ' The object model shows DDDoc has CopyToClipboard and DeleteTextSelected
+    ' We might be able to combine these for redaction
+    
+    ' Get the full text of the selection
+    Dim selectedText As String
+    selectedText = objDDTextSelect.GetText()
+    
+    If Err.Number = 0 And selectedText <> "" Then
+        Debug.Print "  - Selected text: '" & selectedText & "'"
+        Debug.Print "  - Text length: " & Len(selectedText)
+        
+        ' Since positions are within the found phrase, we need to mark them
+        ' This may require manual redaction marking via API or alternative approach
+        
+        ' Try to get partial selection
+        ' Note: This is speculative as we don't know exact DDTextSelect properties
+        Dim partialSelection As Object
+        Set partialSelection = objDDTextSelect.SubSelect(REDACT_START_CHAR, REDACT_END_CHAR)
+        
+        If Err.Number = 0 Then
+            Debug.Print "✓ Created partial selection from chars " & REDACT_START_CHAR & " to " & REDACT_END_CHAR
+            Set objDDTextSelect = partialSelection
+        Else
+            Err.Clear
+            Debug.Print "⚠ Could not create sub-selection (SubSelect method may not exist)"
+        End If
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not get selected text"
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    Debug.Print "Partial word marking attempted. Proceed to Step 5."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step4_MarkPartialWord: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 5: Apply redaction
+' ============================================================
+Sub Step5_ApplyRedaction()
+    On Error GoTo ErrorHandler
+    
+    If objDDDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 5: Applying Redaction ==="
+    
+    ' Based on object model, DDDoc has CopyToClipboard and DeleteTextSelected
+    ' We can use these to redact text
+    
+    On Error Resume Next
+    
+    ' Option 1: Use DeleteTextSelected to remove the text
+    objDDDoc.DeleteTextSelected()
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text deleted using DeleteTextSelected (redaction applied)"
+        GoTo Success
+    Else
+        Err.Clear
+        Debug.Print "⚠ DeleteTextSelected not available or failed"
+    End If
+    
+    ' Option 2: Copy to clipboard then delete (simulate redaction)
+    objDDDoc.CopyToClipboard()
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Text copied to clipboard"
+        ' Now try to delete the copied text
+        objDDDoc.DeleteTextSelected()
+        If Err.Number = 0 Then
+            Debug.Print "✓ Text deleted after copying (redaction applied)"
+            GoTo Success
+        Else
+            Err.Clear
+            Debug.Print "⚠ Could not delete text after copying"
+        End If
+    Else
+        Err.Clear
+        Debug.Print "⚠ CopyToClipboard not available or failed"
+    End If
+    
+    ' Option 3: Try to use DDTextSelect to delete
+    If Not objDDTextSelect Is Nothing Then
+        objDDTextSelect.Delete()
+        If Err.Number = 0 Then
+            Debug.Print "✓ Text deleted via DDTextSelect (redaction applied)"
+            GoTo Success
+        Else
+            Err.Clear
+            Debug.Print "⚠ Could not delete via DDTextSelect"
+        End If
+    End If
+    
+    Debug.Print "✗ Could not apply redaction - method not available"
+    Debug.Print "  Please explore Object Browser for deletion methods"
+    On Error GoTo ErrorHandler
+    Exit Sub
+    
+Success:
+    On Error GoTo ErrorHandler
+    Debug.Print "✓ Redaction applied successfully."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step5_ApplyRedaction: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' STEP 6: Save document with new name
+' ============================================================
+Sub Step6_SaveDocument()
+    On Error GoTo ErrorHandler
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== STEP 6: Saving Document ==="
+    
+    ' Generate new filename
+    Dim filePath As String
+    Dim fileExt As String
+    Dim baseName As String
+    Dim folderPath As String
+    
+    filePath = PDF_FILE
+    fileExt = Right(filePath, Len(filePath) - InStrRev(filePath, ".") + 1)
+    baseName = Left(filePath, InStrRev(filePath, ".") - 1)
+    folderPath = Left(filePath, InStrRev(filePath, "\"))
+    
+    Dim newFileName As String
+    newFileName = folderPath & "Redacted_" & Format(Now, "yyyymmdd_hhmmss") & fileExt
+    
+    Debug.Print "Saving as: " & newFileName
+    
+    ' Use DVDoc.Save method (from object model)
+    On Error Resume Next
+    
+    ' Attempt to save with new filename
+    objDVDoc.Save newFileName
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved successfully as: " & newFileName
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        ' Try SaveAs if Save doesn't take parameters
+        objDVDoc.SaveAs newFileName
+    End If
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved successfully as: " & newFileName
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        Debug.Print "⚠ Could not save with new filename, trying to save..."
+    End If
+    
+    ' Just save (overwrites original)
+    objDVDoc.Save
+    
+    If Err.Number = 0 Then
+        Debug.Print "✓ Document saved (overwrote original)"
+        GoTo SaveSuccess
+    Else
+        Err.Clear
+        Debug.Print "✗ Could not save document"
+    End If
+    
+    On Error GoTo ErrorHandler
+    Exit Sub
+    
+SaveSuccess:
+    On Error GoTo ErrorHandler
+    
+    ' Close document
+    objDVDoc.Close
+    Set objDDDoc = Nothing
+    Set objDVDoc = Nothing
+    Set objDDTextSelect = Nothing
+    
+    ' Exit application
+    objApp.Exit
+    Set objApp = Nothing
+    
+    Debug.Print "✓ Document closed and application quit successfully."
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step6_SaveDocument: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' ALTERNATIVE: Search and highlight all occurrences
+' ============================================================
+Sub Step_SearchAndHighlightAll()
+    On Error GoTo ErrorHandler
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "✗ No document open. Run Step1_OpenDocument first."
+        Exit Sub
+    End If
+    
+    Debug.Print "=== ALTERNATIVE: Search and Highlight All Occurrences ==="
+    Debug.Print "Search text: '" & SEARCH_TEXT & "'"
+    
+    ' This method searches through all pages
+    ' Based on object model, DDDoc has CreatePageHilite and CreateWordHilite
+    
+    Dim pageNum As Integer
+    Dim foundText As Object
+    
+    For pageNum = 1 To objDDDoc.GetNumPages()  ' Assuming GetNumPages exists
+        On Error Resume Next
+        Set foundText = objDVDoc.FindText(SEARCH_TEXT, pageNum, True, True)
+        
+        If Err.Number = 0 And Not foundText Is Nothing Then
+            Debug.Print "  - Found on page " & pageNum
+            ' Create hilite for found text
+            objDDDoc.CreateWordHilite foundText
+        Else
+            Err.Clear
+        End If
+        On Error GoTo ErrorHandler
+    Next pageNum
+    
+    Debug.Print "✓ Search and highlight complete"
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "ERROR in Step_SearchAndHighlightAll: " & Err.Description
+    Resume Next
+End Sub
+
+' ============================================================
+' MAIN: Run all steps sequentially
+' ============================================================
+Sub RunAllSteps()
+    Debug.Print ""
+    Debug.Print "========================================"
+    Debug.Print "STARTING INCREMENTAL REDACTION TEST"
+    Debug.Print "========================================"
+    Debug.Print ""
+    
+    Step1_OpenDocument
+    
+    If objDVDoc Is Nothing Then
+        Debug.Print "ABORTING: Document failed to open."
+        Exit Sub
+    End If
+    
+    Step2_TestFindText
+    Step3_PrepareRedaction
+    Step4_MarkPartialWord
+    Step5_ApplyRedaction
+    Step6_SaveDocument
+    
+    Debug.Print ""
+    Debug.Print "========================================"
+    Debug.Print "TEST COMPLETE"
+    Debug.Print "========================================"
+End Sub
+
+' ============================================================
+' CLEANUP: Close document and quit application
+' ============================================================
+Sub Cleanup()
+    On Error Resume Next
+    If Not objDVDoc Is Nothing Then
+        objDVDoc.Close
+        Set objDVDoc = Nothing
+    End If
+    If Not objDDDoc Is Nothing Then
+        Set objDDDoc = Nothing
+    End If
+    If Not objDDTextSelect Is Nothing Then
+        Set objDDTextSelect = Nothing
+    End If
+    If Not objApp Is Nothing Then
+        objApp.Exit
+        Set objApp = Nothing
+    End If
+    Debug.Print "✓ Cleanup completed"
+End Sub
+
+' ============================================================
+' EXPLORATION: List all available methods on objects
+' ============================================================
+Sub ExploreObjects()
+    On Error Resume Next
+    
+    Debug.Print "=== OBJECT EXPLORATION ==="
+    Debug.Print ""
+    
+    ' Try to create objects and list their methods
+    Dim appObj As Object
+    Set appObj = CreateObject("PDFPlus.Application")
+    
+    If Not appObj Is Nothing Then
+        Debug.Print "App object created successfully"
+        Debug.Print "Trying to invoke GetActiveDoc..."
+        Dim doc As Object
+        Set doc = appObj.GetActiveDoc
+        If Not doc Is Nothing Then
+            Debug.Print "  - GetActiveDoc returned a document"
+        Else
+            Debug.Print "  - GetActiveDoc returned Nothing"
+        End If
+        
+        Debug.Print ""
+        Debug.Print "Try opening a document manually and then use the Immediate Window:"
+        Debug.Print "  ? objApp.GetActiveDoc.GetDDDoc"
+        Debug.Print "  ? objApp.GetDVDoc"
+    End If
+    
+    Debug.Print ""
+    Debug.Print "Recommended exploration steps:"
+    Debug.Print "1. Open a PDF in Power PDF manually"
+    Debug.Print "2. In VBA Immediate Window, type: Set obj = GetObject(, ""PDFPlus.Application"")"
+    Debug.Print "3. Then explore: ? obj.GetActiveDoc"
+    Debug.Print "4. Use Object Browser (F2) to see all available methods"
+    
+    Set appObj = Nothing
+End Sub
